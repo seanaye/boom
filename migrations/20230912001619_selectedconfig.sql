@@ -1,5 +1,5 @@
 -- Add migration script here
-CREATE TABLE selected_config (
+CREATE TABLE IF NOT EXISTS selected_config (
   id INTEGER PRIMARY KEY CHECK (id = 0),
   config_id INTEGER,
 

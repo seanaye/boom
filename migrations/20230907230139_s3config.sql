@@ -1,4 +1,4 @@
-CREATE TABLE s3config (
+CREATE TABLE IF NOT EXISTS s3config (
   id INTEGER PRIMARY KEY,
   private_key TEXT NOT NULL,
   public_key TEXT NOT NULL,

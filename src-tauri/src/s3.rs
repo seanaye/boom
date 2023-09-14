@@ -1,10 +1,12 @@
 use rusty_s3::{
     actions::{CreateMultipartUpload, UploadPart},
-    Bucket, Credentials, S3Action, UrlStyle,
+    Bucket, Credentials, S3Action,
 };
-use sqlx::{FromRow, Pool, Sqlite};
 use std::time::Duration;
-use tauri_plugin_http::reqwest::{Client, Url};
+use tauri::http::header::ETAG;
+use tauri_plugin_http::reqwest::{Client, IntoUrl, Url, Response};
+
+use crate::error::AnyhowError;
 
 #[derive(Clone)]
 pub struct S3Config {
@@ -23,95 +25,62 @@ impl S3Config {
     }
 }
 
-#[derive(Clone)]
-struct S3Client {
-    client: Client,
+pub struct InProgressUpload {
+    parts_counter: u16,
     config: S3Config,
-}
-
-struct InProgressS3Client {
-    client: S3Client,
     etags: Vec<String>,
     multipart_id: String,
     obj_name: String,
 }
 
-impl InProgressS3Client {
-    pub fn sign_part(&self) -> Url {
+
+impl InProgressUpload {
+    pub async fn new(config: S3Config, obj_name: String, client: &Client) -> Result<Self, AnyhowError> {
+        let action = CreateMultipartUpload::new(&config.bucket, Some(&config.credentials), &obj_name);
+        let url = action.sign(Duration::from_secs(3600));
+        let resp = client.post(url).send().await?.error_for_status()?;
+        let body = resp.text().await?;
+
+        let multipart = CreateMultipartUpload::parse_response(&body)?;
+        Ok(Self {
+            config,
+            obj_name,
+            etags: Vec::new(),
+            parts_counter: 0,
+            multipart_id: multipart.upload_id().to_owned()
+        })
+    }
+
+    pub fn sign_part(&mut self) -> Url {
         let part_upload = UploadPart::new(
-            &self.client.config.bucket,
-            Some(&self.client.config.credentials),
+            &self.config.bucket,
+            Some(&self.config.credentials),
             &self.obj_name,
-            self.etags.len() as u16 + 1,
+            self.parts_counter,
             &self.multipart_id,
         );
+        self.parts_counter += 1;
         part_upload.sign(Duration::from_secs(3600))
     }
-}
 
-pub enum S3ClientState {
-    Unconfigured(Client),
-    Idle(S3Client),
-    InProgress(InProgressS3Client),
-}
-
-impl S3ClientState {
-    fn get_client(self) -> Client {
-        match self {
-            Self::Idle(c) => c.client,
-            Self::InProgress(c) => c.client.client,
-            Self::Unconfigured(c) => c,
-        }
+    pub async fn upload_part(client: &Client, url: impl IntoUrl, bytes: Vec<u8>) -> Result<Response, AnyhowError> {
+            client
+            .put(url)
+            .body(bytes)
+            .send()
+            .await
+            .and_then(|r| r.error_for_status())
+            .map_err(AnyhowError::new)
     }
 
-    fn reset(self) -> Self {
-        Self::Unconfigured(self.get_client())
-    }
+    pub fn handle_response(&mut self, res: Response) {
+        let etag = res
+            .headers()
+            .get(ETAG)
+            .expect("every UploadPart request returns an Etag");
+        self.etags
+            .push(etag.to_str().expect("Etag is always ascii").to_owned());
 
-    pub async fn load_config(self, config: S3Config) -> anyhow::Result<Self> {
-        let client = self.get_client();
-        Ok(Self::Idle(S3Client { client, config }))
-    }
-
-    pub async fn create_upload(self, obj_name: impl ToString) -> anyhow::Result<Self> {
-        match self {
-            Self::Unconfigured(_) => anyhow::bail!("client not configured"),
-            Self::InProgress(_) => anyhow::bail!("client already uploading"),
-            Self::Idle(c) => {
-                let obj_name = obj_name.to_string();
-                let action = CreateMultipartUpload::new(
-                    &c.config.bucket,
-                    Some(&c.config.credentials),
-                    &obj_name,
-                );
-                let url = action.sign(Duration::from_secs(3600));
-
-                let body = c
-                    .client
-                    .post(url)
-                    .send()
-                    .await?
-                    .error_for_status()?
-                    .text()
-                    .await?;
-                let multipart = CreateMultipartUpload::parse_response(&body)?;
-                let id = multipart.upload_id().to_string();
-
-                Ok(Self::InProgress(InProgressS3Client {
-                    client: c,
-                    etags: Vec::new(),
-                    multipart_id: id,
-                    obj_name,
-                }))
-            }
-        }
-    }
-
-    pub fn sign_part(&mut self) -> anyhow::Result<Url> {
-        match self {
-            Self::Unconfigured(_) => anyhow::bail!("client is not configured"),
-            Self::Idle(_) => anyhow::bail!("no multipart upload has been started"),
-            Self::InProgress(c) => Ok(c.sign_part()),
-        }
     }
 }
+

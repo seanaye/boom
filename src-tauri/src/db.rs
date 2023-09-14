@@ -33,26 +33,26 @@ pub trait CRUD<T, Output> {
 
 #[derive(Debug, FromRow, Clone, Default, Validate, Serialize, Deserialize)]
 pub struct S3ConfigFields {
-    #[validate(length(min = 1))]
+    #[validate(length(min = 1, message = "Required Field"))]
     pub private_key: String,
 
-    #[validate(length(min = 1))]
+    #[validate(length(min = 1, message = "Required Field"))]
     pub public_key: String,
 
-    #[validate(length(min = 1))]
+    #[validate(length(min = 1, message = "Required Field"))]
     pub nickname: String,
 
-    #[validate(url)]
+    #[validate(url(message = "Must be a valid url"))]
     pub endpoint: String,
 
-    #[validate(length(min = 1))]
+    #[validate(length(min = 1, message = "Required Field"))]
     pub region: String,
 
-    #[validate(length(min = 1))]
+    #[validate(length(min = 1, message = "Required Field"))]
     pub bucket_name: String,
 
     #[sqlx(default)]
-    #[validate(url)]
+    #[validate(url(message = "Must be a valid url or empty"))]
     pub host_rewrite: Option<String>,
 }
 
@@ -154,7 +154,7 @@ impl CRUD<i64, S3ConfigRaw> for S3ConfigFields {
     }
 }
 
-#[derive(FromRow, Clone, Serialize, Deserialize)]
+#[derive(FromRow, Clone, Serialize, Deserialize, Debug)]
 pub struct S3ConfigRaw {
     id: i64,
 
@@ -190,9 +190,9 @@ pub struct SelectedConfig {
 }
 
 impl SelectedConfig {
-    pub async fn get(conn: &SqlitePool) -> Result<Option<Self>, AnyhowError> {
+    pub async fn get(conn: &SqlitePool) -> Result<Option<S3ConfigRaw>, AnyhowError> {
         Ok(
-            sqlx::query_as::<_, Self>("SELECT id, config_id FROM selected_config where id = 0")
+            sqlx::query_as::<_, S3ConfigRaw>("SELECT s3config.* FROM selected_config LEFT JOIN s3config ON selected_config.config_id = s3config.id")
                 .fetch_optional(conn)
                 .await
                 .map_err(AnyhowError::new)?,
@@ -204,7 +204,7 @@ impl SelectedConfig {
         conn: &SqlitePool,
     ) -> Result<SqliteQueryResult, AnyhowError> {
         Ok(
-            sqlx::query("INSERT OR REPLACE INTO selected_config (id, config_id) VALUES (1, ?)")
+            sqlx::query("INSERT OR REPLACE INTO selected_config (id, config_id) VALUES (0, ?)")
                 .bind(id)
                 .execute(conn)
                 .await

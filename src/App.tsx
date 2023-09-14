@@ -1,4 +1,4 @@
-import { Accessor, Show, createResource, createSignal } from "solid-js";
+import { Accessor, For, Show, createResource, createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 import { invoke, Channel } from "@tauri-apps/api/tauri";
 
@@ -189,11 +189,35 @@ function CreateS3ConfigForm() {
 
 function S3ConfigFormList() {
   const [formData] = createResource(async () => {
-    const r = await invoke("plugin:api|list_configs");
-    console.log(r);
+    const r: Array<{ id: number }> = await invoke("plugin:api|list_configs");
     return r;
   });
-  return <div>{JSON.stringify(formData())}</div>;
+  const [active, { refetch }] = createResource(async () => {
+    const r: { id: number } = await invoke("plugin:api|get_selected");
+    return r;
+  });
+
+  async function onClick(configId: number) {
+    await invoke("plugin:api|set_selected", { configId });
+    refetch();
+  }
+
+  return (
+    <div>
+      <For each={formData()}>
+        {(d) => (
+          <button
+            onclick={() => onClick(d.id)}
+            class={`p-2 border bg-gray-100 ${
+              active()?.id === d.id ? "bg-gray-200" : ""
+            }`}
+          >
+            {JSON.stringify(d)}
+          </button>
+        )}
+      </For>
+    </div>
+  );
 }
 
 export default App;

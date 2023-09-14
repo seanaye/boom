@@ -3,12 +3,27 @@ use std::fmt::Display;
 use serde::Serialize;
 use thiserror::Error;
 
+#[derive(Debug)]
 pub struct AnyhowError(anyhow::Error);
+
 impl AnyhowError {
     pub fn new<T: std::error::Error + std::marker::Sync + std::marker::Send + 'static>(
         e: T,
     ) -> Self {
         Self(anyhow::Error::new(e))
+    }
+}
+
+// impl From<anyhow::Error> for AnyhowError {
+//     fn from(value: anyhow::Error) -> Self {
+//         Self(value)
+//     }
+// }
+
+impl<T> From<T> for AnyhowError
+    where T: Into<anyhow::Error> {
+        fn from(value: T) -> Self {
+        Self(value.into())
     }
 }
 
