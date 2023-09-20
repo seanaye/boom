@@ -325,6 +325,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "bytes",
  "mime",
  "parking_lot",
  "rusty-s3",

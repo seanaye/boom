@@ -14,17 +14,10 @@ fn main() {
     println!("{}", tauri::path::BaseDirectory::AppData.variable());
 
     tauri::Builder::default()
-        .invoke_handler(generate_handler![test])
         .plugin(tauri_plugin_http::init())
         .plugin(plugin::Api::init("sqlite:boom.db").build())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-#[command]
-async fn test<R: Runtime>(app: AppHandle<R>) -> Result<String, ()> {
-    println!("test_handler");
-    Ok("Hello World!".to_string())
 }
 
 // mod server {

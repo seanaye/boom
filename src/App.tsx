@@ -1,79 +1,83 @@
 import { Accessor, For, Show, createResource, createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 import { invoke, Channel } from "@tauri-apps/api/tauri";
+import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 
 function App() {
   const [recording, setRecording] = createSignal<MediaRecorder | null>(null);
 
-  const mimes = [
-    "video/webm; codecs=vp9",
-    "video/webm",
-    "video/mpeg",
-    "video/mp4",
-  ];
+  // const mimes = [
+  //   "video/webm; codecs=vp9",
+  //   "video/webm",
+  //   "video/mpeg",
+  //   "video/mp4",
+  // ];
 
-  const mime = mimes.find(MediaRecorder.isTypeSupported);
+  // const mime = mimes.find(MediaRecorder.isTypeSupported);
 
-  if (!mime) {
-    return <div>platform not supported</div>;
-  }
+  // if (!mime) {
+  //   return <div>platform not supported</div>;
+  // }
 
   const [{ loading: streaming, error }] = createResource(
     recording,
     async (mediaRecorder) => {
-      const body = new ReadableStream({
-        start: (controller) => {
-          mediaRecorder.ondataavailable = async (e) => {
-            controller.enqueue(new Uint8Array(await e.data.arrayBuffer()));
-          };
-          mediaRecorder.onstop = () => {
-            console.log("onstop");
-            controller.close();
-          };
+      await invoke("plugin:api|begin_upload");
 
-          mediaRecorder.start(1000);
-        },
-        // pull: () => {
-        //   console.log('pull', mediaRecorder)
-        //   setTimeout(() => mediaRecorder.requestData(), 10)
-        // },
-        cancel: () => {
-          console.log("cancel");
-          mediaRecorder.stop();
-        },
-      });
-      const out = fetch(
-        "https://06b9-2607-fea8-1c40-d400-18d7-1579-b697-8c5e.ngrok-free.app/api/stream",
-        {
-          method: "POST",
-          body,
-          headers: { "Content-Type": mime },
-          // @ts-ignore
-          duplex: "half",
-        },
-      );
-      console.log(out);
-      console.log(await out);
-      return out;
+      mediaRecorder.ondataavailable = async (e) => {
+        const buf = await e.data.arrayBuffer();
+        const options = !recording()
+          ? { headers: { final: "true" } }
+          : undefined;
+        console.log({ options })
+        invoke("plugin:api|upload_url_part", buf, options);
+      };
+
+      mediaRecorder.start(1000);
+
+      // const body = new ReadableStream({
+      //   start: (controller) => {
+
+      //     mediaRecorder.start(1000);
+      //   },
+      //   // pull: () => {
+      //   //   console.log('pull', mediaRecorder)
+      //   //   setTimeout(() => mediaRecorder.requestData(), 10)
+      //   // },
+      //   cancel: () => {
+      //     console.log("cancel");
+      //     mediaRecorder.stop();
+      //   },
+      // });
+      // const out = fetch(
+      //   "https://06b9-2607-fea8-1c40-d400-18d7-1579-b697-8c5e.ngrok-free.app/api/stream",
+      //   {
+      //     method: "POST",
+      //     body,
+      //     headers: { "Content-Type": mime },
+      //     // @ts-ignore
+      //     duplex: "half",
+      //   },
+      // );
     },
   );
 
   async function record() {
+    console.log("before");
     const stream = await navigator.mediaDevices.getDisplayMedia({
       video: true,
     });
+    console.log("after");
 
-    const mediaRecorder = new MediaRecorder(stream, {
-      mimeType: mime,
-    });
+    const mediaRecorder = new MediaRecorder(stream);
     setRecording(mediaRecorder);
   }
 
   function stop() {
     const recorder = recording();
     if (!recorder) return;
-    recorder.stop();
     setRecording(null);
+    recorder.stop();
   }
 
   return (
@@ -85,6 +89,14 @@ function App() {
           </button>
           <button type="button" onClick={stop}>
             Stop
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              invoke("plugin:api|test_cmd", new Uint8Array([1, 2, 3, 4]))
+            }
+          >
+            Tester
           </button>
           <p>{error}</p>
           <Show when={streaming}>

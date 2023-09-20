@@ -1,7 +1,7 @@
 use anyhow::Context;
 use sqlx::{Pool, SqlitePool, Sqlite, migrate::MigrateDatabase};
-use tauri_plugin_http::reqwest::Client;
-use std::{path::PathBuf};
+use tauri_plugin_http::reqwest::{Client, Url};
+use std::{path::PathBuf, future::Future, pin::Pin};
 use tauri::{
     command, generate_handler,
     ipc::{Channel, InvokeBody},
@@ -9,6 +9,7 @@ use tauri::{
     AppHandle, Manager, Runtime,
 };
 use std::sync::Arc;
+use bytes::Bytes;
 // use tauri::async_runtime::RwLock;
 use parking_lot::RwLock;
 use crate::{
@@ -36,12 +37,19 @@ fn path_mapper(mut app_path: PathBuf, connection_string: &str) -> String {
     )
 }
 
-pub struct HttpClient(pub Arc<Client>);
+pub struct HttpClient(pub Client);
 
+pub struct UploadState(pub RwLock<Option<InProgressUpload>>);
+
+impl Default for UploadState {
+    fn default() -> Self {
+        Self(RwLock::new(None))
+    }
+}
 
 impl Default for HttpClient {
     fn default() -> Self {
-        Self(Arc::new(Client::default()))
+        Self(Client::default())
     }
 }
 
@@ -68,6 +76,7 @@ impl Api {
                     sqlx::migrate!("../migrations").run(&pool).await?;
                     app.manage(pool);
                     app.manage(HttpClient::default());
+                    app.manage(UploadState::default());
 
                     Ok(())
                 })
@@ -78,7 +87,10 @@ impl Api {
                 update_config,
                 delete_config,
                 get_selected,
-                set_selected
+                set_selected,
+                begin_upload,
+                upload_url_part,
+            
             ])
             .build()
     }
@@ -139,37 +151,60 @@ async fn set_selected<R: Runtime>(app: AppHandle<R>, config_id: i64) -> Result<(
 #[command]
 async fn begin_upload<R: Runtime>(
     app: AppHandle<R>,
-) -> Result<Channel, AnyhowError> {
+) -> Result<(), AnyhowError> {
     let pool = app.state::<SqlitePool>();
     let config = SelectedConfig::get(&pool)
         .await?
         .context("No config selected")?
         .build()?;
     let s = app.state::<HttpClient>();
-    let upload = InProgressUpload::new(config, "my_upload.mp4".to_owned(), &s.0).await?;
+    let upload = InProgressUpload::new(config, "test.mp4".to_owned(), &s.0).await?;
+    let upload_state = app.state::<UploadState>();
+    upload_state.0.write().replace(upload);
+    Ok(())
 
-    let arc_upload = Arc::new(RwLock::new(upload));
-    let arc_client = Arc::new(Client::default());
+    // let arc_upload = Arc::new(RwLock::new(upload));
+    // let arc_client = Arc::new(Client::default());
 
-    Ok(Channel::new(move |payload| {
-        let arc_upload = arc_upload.clone();
-        let arc_client = arc_client.clone();
-        
-        match payload {
-            InvokeBody::Json(j) => {
-                dbg!(j);
-                Ok(())
-            },
-            InvokeBody::Raw(b) => {
-                tauri::async_runtime::spawn(async move {
-                    let upload = arc_upload.clone();
-                    let client = arc_client.clone();
-                    let url = upload.write().sign_part();
-                    let res = InProgressUpload::upload_part(&client, url, b).await.unwrap();
-                    upload.write().handle_response(res);
-                });
-                Ok(())
-            }
-        }
-    }))
+    // dbg!("creating channel");
+    // Ok(Channel::new(move |payload| {
+    //     let arc_upload = arc_upload.clone();
+    //     let arc_client = arc_client.clone();
+    //     
+    //     match payload {
+    //         InvokeBody::Json(j) => {
+    //             dbg!(j);
+    //             Ok(())
+    //         },
+    //         InvokeBody::Raw(b) => {
+    //             tauri::async_runtime::spawn(async move {
+    //                 let upload = arc_upload.clone();
+    //                 let client = arc_client.clone();
+    //                 let url = upload.write().sign_part();
+    //                 InProgressUpload::upload_part(&client, url, b).await.map(|res| upload.write().handle_response(res))
+    //             });
+    //             Ok(())
+    //         }
+    //     }
+    // }))
 }
+
+
+#[command]
+async fn upload_url_part<R: Runtime, 'a>(app: AppHandle<R>, request: tauri::ipc::Request<'a>) -> Result<(), AnyhowError> {
+    let upload_state = app.state::<UploadState>();
+    let client = app.state::<HttpClient>();
+    let slice: &[u8] =  match request.body() {
+        InvokeBody::Raw(b) => Ok(b),
+        _ => Err(AnyhowError::from(anyhow::anyhow!("expected raw bytes")))
+    }?;
+
+
+    let s = upload_state.0.read();
+    match (s.as_ref(), request.headers().get("final")) {
+        (Some(upload), None) => upload.upload_part(&client.0, slice).await,
+        (Some(upload), Some(_)) => upload.complete_upload(&client.0, slice).await,
+        _ => Err(AnyhowError::from(anyhow::anyhow!("No upload in progress")))
+    }
+}
+
