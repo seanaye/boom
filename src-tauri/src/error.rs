@@ -21,8 +21,10 @@ impl AnyhowError {
 // }
 
 impl<T> From<T> for AnyhowError
-    where T: Into<anyhow::Error> {
-        fn from(value: T) -> Self {
+where
+    T: Into<anyhow::Error>,
+{
+    fn from(value: T) -> Self {
         Self(value.into())
     }
 }

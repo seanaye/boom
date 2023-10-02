@@ -1,21 +1,19 @@
+use crate::{
+    db::{S3ConfigFields, S3ConfigId, S3ConfigRaw, SelectedConfig, CRUD},
+    error::{AnyhowError, Validated},
+    s3::{MultipartUploader, UploadManager, OutputMeta},
+};
 use anyhow::Context;
-use sqlx::{Pool, SqlitePool, Sqlite, migrate::MigrateDatabase};
-use tauri_plugin_http::reqwest::{Client, Url};
-use std::{path::PathBuf, future::Future, pin::Pin};
+use sqlx::{migrate::MigrateDatabase, Pool, Sqlite, SqlitePool};
+use std::path::PathBuf;
 use tauri::{
     command, generate_handler,
-    ipc::{Channel, InvokeBody},
+    ipc::InvokeBody,
     plugin::{Builder as PluginBuilder, TauriPlugin},
     AppHandle, Manager, Runtime,
 };
-use std::sync::Arc;
-use bytes::Bytes;
-// use tauri::async_runtime::RwLock;
-use parking_lot::RwLock;
-use crate::{
-    db::{S3ConfigFields, S3ConfigId, S3ConfigRaw, SelectedConfig, CRUD},
-    error::{AnyhowError, Validated}, s3::InProgressUpload,
-};
+use tauri_plugin_http::reqwest::Client;
+use uuid::Uuid;
 
 pub struct Api {
     database_str: String,
@@ -39,14 +37,6 @@ fn path_mapper(mut app_path: PathBuf, connection_string: &str) -> String {
 
 pub struct HttpClient(pub Client);
 
-pub struct UploadState(pub RwLock<Option<InProgressUpload>>);
-
-impl Default for UploadState {
-    fn default() -> Self {
-        Self(RwLock::new(None))
-    }
-}
-
 impl Default for HttpClient {
     fn default() -> Self {
         Self(Client::default())
@@ -66,7 +56,6 @@ impl Api {
                 let config = api.config();
                 let app_path = app.path().app_config_dir().expect("No app path found");
                 let fqdb = path_mapper(app_path, &self.database_str);
-                
 
                 tauri::async_runtime::block_on(async move {
                     if !Sqlite::database_exists(&fqdb).await.unwrap_or(false) {
@@ -76,7 +65,7 @@ impl Api {
                     sqlx::migrate!("../migrations").run(&pool).await?;
                     app.manage(pool);
                     app.manage(HttpClient::default());
-                    app.manage(UploadState::default());
+                    app.manage(UploadManager::default());
 
                     Ok(())
                 })
@@ -90,7 +79,6 @@ impl Api {
                 set_selected,
                 begin_upload,
                 upload_url_part,
-            
             ])
             .build()
     }
@@ -149,62 +137,34 @@ async fn set_selected<R: Runtime>(app: AppHandle<R>, config_id: i64) -> Result<(
 }
 
 #[command]
-async fn begin_upload<R: Runtime>(
-    app: AppHandle<R>,
-) -> Result<(), AnyhowError> {
+async fn begin_upload<R: Runtime>(app: AppHandle<R>) -> Result<(), AnyhowError> {
     let pool = app.state::<SqlitePool>();
     let config = SelectedConfig::get(&pool)
         .await?
         .context("No config selected")?
         .build()?;
-    let s = app.state::<HttpClient>();
-    let upload = InProgressUpload::new(config, "test.mp4".to_owned(), &s.0).await?;
-    let upload_state = app.state::<UploadState>();
-    upload_state.0.write().replace(upload);
+    let manager = app.state::<UploadManager>();
+    manager
+        .new_upload(config, format!("{}.mp4", Uuid::new_v4()))
+        .await?;
     Ok(())
-
-    // let arc_upload = Arc::new(RwLock::new(upload));
-    // let arc_client = Arc::new(Client::default());
-
-    // dbg!("creating channel");
-    // Ok(Channel::new(move |payload| {
-    //     let arc_upload = arc_upload.clone();
-    //     let arc_client = arc_client.clone();
-    //     
-    //     match payload {
-    //         InvokeBody::Json(j) => {
-    //             dbg!(j);
-    //             Ok(())
-    //         },
-    //         InvokeBody::Raw(b) => {
-    //             tauri::async_runtime::spawn(async move {
-    //                 let upload = arc_upload.clone();
-    //                 let client = arc_client.clone();
-    //                 let url = upload.write().sign_part();
-    //                 InProgressUpload::upload_part(&client, url, b).await.map(|res| upload.write().handle_response(res))
-    //             });
-    //             Ok(())
-    //         }
-    //     }
-    // }))
 }
-
 
 #[command]
-async fn upload_url_part<R: Runtime, 'a>(app: AppHandle<R>, request: tauri::ipc::Request<'a>) -> Result<(), AnyhowError> {
-    let upload_state = app.state::<UploadState>();
-    let client = app.state::<HttpClient>();
-    let slice: &[u8] =  match request.body() {
+async fn upload_url_part<R: Runtime, 'a>(
+    app: AppHandle<R>,
+    request: tauri::ipc::Request<'a>,
+) -> Result<Option<OutputMeta>, AnyhowError> {
+    let manager = app.state::<UploadManager>();
+    let slice: &[u8] = match request.body() {
         InvokeBody::Raw(b) => Ok(b),
-        _ => Err(AnyhowError::from(anyhow::anyhow!("expected raw bytes")))
+        _ => Err(AnyhowError::from(anyhow::anyhow!("expected raw bytes"))),
     }?;
 
+    let out: Result<Option<OutputMeta>, AnyhowError> = match request.headers().get("final") {
+        None => manager.upload_part(slice).await.map(|_| None),
+        Some(_) => manager.complete_upload(slice).await.and_then(|_| manager.reset().map(Some)),
+    };
 
-    let s = upload_state.0.read();
-    match (s.as_ref(), request.headers().get("final")) {
-        (Some(upload), None) => upload.upload_part(&client.0, slice).await,
-        (Some(upload), Some(_)) => upload.complete_upload(&client.0, slice).await,
-        _ => Err(AnyhowError::from(anyhow::anyhow!("No upload in progress")))
-    }
+    out
 }
-

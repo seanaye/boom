@@ -28,6 +28,7 @@ thiserror = "1.0.48"
 parking_lot = { version = "0.12.1", features = ["send_guard"] }
 mime = "0.3.17"
 bytes = "1.5.0"
+uuid = { version = "1.4.1", features = ["v4", "fast-rng"] }
 
 [features]
 # by default Tauri runs in production mode
