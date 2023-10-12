@@ -1,4 +1,3 @@
-use std::fmt::Display;
 
 use crate::{
     error::{AnyhowError, AppError},
@@ -15,21 +14,53 @@ trait Identity<T> {
     fn identity(&self) -> T;
 }
 
+#[derive(Clone, Copy, Serialize, Deserialize)]
+pub struct I64Id {
+    pub id: i64,
+}
+impl Identity<i64> for I64Id {
+    fn identity(&self) -> i64 {
+        self.id
+    }
+}
+impl Identity<i64> for &I64Id {
+    fn identity(&self) -> i64 {
+        self.id
+    }
+}
+
 #[async_trait]
-pub trait CRUD<T, Output> {
-    async fn create(self, conn: &SqlitePool) -> Result<Output, AppError>;
-    async fn read<U: Identity<T> + Send>(i: U, conn: &SqlitePool) -> Result<Output, AnyhowError>;
+pub trait Create<Input>: Sized {
+    async fn create(input: Input, conn: &SqlitePool) -> Result<Self, AppError>;
+}
+
+#[async_trait]
+pub trait Read<T>: Sized {
+    async fn read<U: Identity<T> + Send>(i: U, conn: &SqlitePool) -> Result<Self, AnyhowError>;
+}
+
+#[async_trait]
+pub trait Update<T, Input>: Sized {
     async fn update<U: Identity<T> + Send>(
-        self,
         i: U,
+        fields: Input,
         conn: &SqlitePool,
-    ) -> Result<Output, AppError>;
+    ) -> Result<Self, AppError>;
+}
+
+#[async_trait]
+pub trait Delete<T> {
     async fn delete<U: Identity<T> + Send>(
         i: U,
         conn: &SqlitePool,
     ) -> Result<SqliteQueryResult, AnyhowError>;
-    async fn list(conn: &SqlitePool) -> Result<Vec<Output>, AnyhowError>;
 }
+
+#[async_trait]
+pub trait List: Sized {
+    async fn list(conn: &SqlitePool) -> Result<Vec<Self>, AnyhowError>;
+}
+
 
 #[derive(Debug, FromRow, Clone, Default, Validate, Serialize, Deserialize)]
 pub struct S3ConfigFields {
@@ -62,74 +93,67 @@ impl Identity<i64> for &S3ConfigRaw {
     }
 }
 
-pub struct S3ConfigId(i64);
-
-impl Identity<i64> for S3ConfigId {
-    fn identity(&self) -> i64 {
-        self.0
-    }
-}
-
-impl S3ConfigId {
-    pub fn new(id: i64) -> Self {
-        Self(id)
+#[async_trait]
+impl Create<S3ConfigFields> for S3ConfigRaw {
+    async fn create(input: S3ConfigFields, conn: &SqlitePool) -> Result<S3ConfigRaw, AppError> {
+        input.validate()?;
+        let res = sqlx::query("INSERT INTO s3config (private_key, public_key, nickname, endpoint, region, bucket_name, host_rewrite) VALUES (?, ?, ?, ?, ?, ?, ?)")
+            .bind(&input.private_key)
+            .bind(&input.public_key)
+            .bind(&input.nickname)
+            .bind(&input.endpoint)
+            .bind(&input.region)
+            .bind(&input.bucket_name)
+            .bind(&input.host_rewrite)
+            .execute(conn)
+            .await.map_err(AppError::anyhow)?;
+        let id = res.last_insert_rowid();
+        Ok(S3ConfigRaw { fields: input, id })
     }
 }
 
 #[async_trait]
-impl CRUD<i64, S3ConfigRaw> for S3ConfigFields {
-    async fn create(self, conn: &SqlitePool) -> Result<S3ConfigRaw, AppError> {
-        self.validate()?;
-        let res = sqlx::query("INSERT INTO s3config (private_key, public_key, nickname, endpoint, region, bucket_name, host_rewrite) VALUES (?, ?, ?, ?, ?, ?, ?)")
-            .bind(&self.private_key)
-            .bind(&self.public_key)
-            .bind(&self.nickname)
-            .bind(&self.endpoint)
-            .bind(&self.region)
-            .bind(&self.bucket_name)
-            .bind(&self.host_rewrite)
-            .execute(conn)
-            .await.map_err(AppError::anyhow)?;
-        let id = res.last_insert_rowid();
-        Ok(S3ConfigRaw { fields: self, id })
-    }
+impl Read<i64> for S3ConfigRaw {
     async fn read<U: Identity<i64> + Send>(
         i: U,
         conn: &SqlitePool,
     ) -> Result<S3ConfigRaw, AnyhowError> {
         let id = i.identity();
 
-        let res = sqlx::query_as::<_, Self>("SELECT * FROM s3config WHERE id = ?")
+        Ok(sqlx::query_as::<_, Self>("SELECT * FROM s3config WHERE id = ?")
             .bind(id)
             .fetch_one(conn)
-            .await
-            .map_err(AnyhowError::new)?;
-        // Ok(res)
-        Ok(S3ConfigRaw { fields: res, id })
+            .await?)
     }
+}
+
+#[async_trait]
+impl Update<i64, S3ConfigFields> for S3ConfigRaw {
 
     async fn update<U: Identity<i64> + Send>(
-        self,
         i: U,
+        input: S3ConfigFields,
         conn: &SqlitePool,
     ) -> Result<S3ConfigRaw, AppError> {
-        self.validate().map_err(|e| AppError::ValidationError(e))?;
+        input.validate().map_err(|e| AppError::ValidationError(e))?;
         let id = i.identity();
 
-        let res = sqlx::query("UPDATE s3config SET private_key = ?, public_key = ?, nickname = ?, endpoint = ?, region = ?, bucket_name = ?, host_rewrite = ? WHERE id = ?")
-            .bind(&self.private_key)
-            .bind(&self.public_key)
-            .bind(&self.nickname)
-            .bind(&self.endpoint)
-            .bind(&self.region)
-            .bind(&self.bucket_name)
-            .bind(&self.host_rewrite)
+        sqlx::query_as::<_, Self>("UPDATE s3config SET private_key = ?, public_key = ?, nickname = ?, endpoint = ?, region = ?, bucket_name = ?, host_rewrite = ? WHERE id = ?")
+            .bind(&input.private_key)
+            .bind(&input.public_key)
+            .bind(&input.nickname)
+            .bind(&input.endpoint)
+            .bind(&input.region)
+            .bind(&input.bucket_name)
+            .bind(&input.host_rewrite)
             .bind(id)
-            .execute(conn)
-            .await.map_err(|e| AppError::Anyhow(anyhow::Error::new(e)))?;
-
-        Ok(S3ConfigRaw { fields: self, id })
+            .fetch_one(conn)
+            .await.map_err(|e| AppError::Anyhow(anyhow::Error::new(e)))
     }
+}
+
+#[async_trait]
+impl Delete<i64> for S3ConfigFields {
 
     async fn delete<U: Identity<i64> + Send>(
         i: U,
@@ -137,20 +161,19 @@ impl CRUD<i64, S3ConfigRaw> for S3ConfigFields {
     ) -> Result<SqliteQueryResult, AnyhowError> {
         let id = i.identity();
 
-        let res = sqlx::query("DELETE FROM s3config WHERE id = ?")
+        Ok(sqlx::query("DELETE FROM s3config WHERE id = ?")
             .bind(id)
             .execute(conn)
-            .await
-            .map_err(AnyhowError::new)?;
-
-        Ok(res)
+            .await?)
     }
+}
 
+#[async_trait]
+impl List for S3ConfigRaw {
     async fn list(conn: &SqlitePool) -> Result<Vec<S3ConfigRaw>, AnyhowError> {
         Ok(sqlx::query_as::<_, S3ConfigRaw>("SELECT * FROM s3config")
             .fetch_all(conn)
-            .await
-            .map_err(AnyhowError::new)?)
+            .await?)
     }
 }
 
@@ -178,8 +201,8 @@ impl S3ConfigRaw {
         Ok(S3Config::new(bucket, credentials, self.fields.host_rewrite))
     }
 
-    pub fn into_parts(self) -> (S3ConfigId, S3ConfigFields) {
-        (S3ConfigId::new(self.id), self.fields)
+    pub fn into_parts(self) -> (I64Id, S3ConfigFields) {
+        (I64Id{ id: self.id }, self.fields)
     }
 }
 
@@ -194,21 +217,70 @@ impl SelectedConfig {
         Ok(
             sqlx::query_as::<_, S3ConfigRaw>("SELECT s3config.* FROM selected_config LEFT JOIN s3config ON selected_config.config_id = s3config.id")
                 .fetch_optional(conn)
-                .await
-                .map_err(AnyhowError::new)?,
+                .await?
         )
     }
 
     pub async fn set(
-        S3ConfigId(id): S3ConfigId,
+        I64Id{id}: I64Id,
         conn: &SqlitePool,
-    ) -> Result<SqliteQueryResult, AnyhowError> {
-        Ok(
-            sqlx::query("INSERT OR REPLACE INTO selected_config (id, config_id) VALUES (0, ?)")
+    ) -> Result<(), AnyhowError> {
+            sqlx::query("INSERT OR REPLACE INTO selected_config (id, config_id) VALUES (0, ?) RETURNING *")
                 .bind(id)
                 .execute(conn)
-                .await
-                .map_err(AnyhowError::new)?,
-        )
+                .await?;
+        Ok(())
+    }
+}
+
+#[derive(FromRow, Serialize, Deserialize, Debug)]
+pub struct Upload {
+    id: i64,
+    url: String,
+    created_at: String,
+}
+
+impl Upload {
+    pub fn url(&self) -> Result<Url, AnyhowError> {
+        Ok(Url::parse(&self.url)?)
+    }
+}
+
+pub struct UploadBuilder {
+    pub url: Url,
+}
+
+
+#[async_trait]
+impl Read<i64> for Upload {
+    async fn read<U: Identity<i64> + Send>(i: U, conn: &SqlitePool) -> Result<Upload, AnyhowError> {
+        let id = i.identity();
+        Ok(sqlx::query_as::<_, Upload>("SELECT * from uploads where id = ?")
+            .bind(id)
+            .fetch_one(conn)
+            .await?)
+
+    }
+}
+
+#[async_trait]
+impl Create<UploadBuilder> for Upload {
+    async fn create(input: UploadBuilder, conn: &SqlitePool) -> Result<Upload, AppError> {
+        sqlx::query_as::<_, Upload>("INSERT INTO uploads (url) VALUES (?) RETURNING *").bind(input.url.to_string()).fetch_one(conn).await.map_err(AppError::anyhow)
+    }
+}
+
+#[async_trait]
+impl List for Upload {
+    async fn list(conn: &SqlitePool) -> Result<Vec<Upload>, AnyhowError> {
+        Ok(sqlx::query_as::<_, Upload>("SELECT * from uploads ORDER BY id DESC").fetch_all(conn).await?)
+    }
+}
+
+#[async_trait]
+impl Delete<i64> for Upload {
+    async fn delete<U: Identity<i64> + Send>(i: U, conn: &SqlitePool) -> Result<SqliteQueryResult, AnyhowError> {
+        let id = i.identity();
+        Ok(sqlx::query("DELETE FROM uploads WHERE id = ?").bind(id).execute(conn).await?)
     }
 }

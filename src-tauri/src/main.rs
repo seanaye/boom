@@ -13,11 +13,16 @@ mod s3;
 fn main() {
     println!("{}", tauri::path::BaseDirectory::AppData.variable());
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_http::init())
+    let mut app = tauri::Builder::default()
+        .plugin(tauri_plugin_positioner::init())
         .plugin(plugin::Api::init("sqlite:boom.db").build())
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+    app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    app.run(|_, _| {})
+    // .run(tauri::generate_context!())
+    // .expect("error while running tauri application");
 }
 
 // mod server {
