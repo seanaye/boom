@@ -19,7 +19,7 @@ function createMediaRecorderPromise(mediaRecorder: MediaRecorder) {
         mediaRecorder.state !== "recording"
           ? { headers: { final: "true" } }
           : undefined;
-      invoke("plugin:api|upload_url_part", buf, options).then((v) => {
+      invoke("upload_url_part", buf, options).then((v) => {
         console.log(v);
         if (v) resolve();
       }, reject);
@@ -83,7 +83,7 @@ export function Provider(props: { children: JSX.Element }) {
   };
 
   const [recorder, setRecorder] = createSignal<MediaRecorder | null>(null);
-  function startRecording() {
+  async function startRecording() {
     const stream = mediaStream();
     if (!stream) return console.log("stream not ready");
     return setRecorder(() => new MediaRecorder(stream));
@@ -96,7 +96,7 @@ export function Provider(props: { children: JSX.Element }) {
 
   const [resource] = createResource(recorder, async (recorder) => {
     console.log(recorder);
-    await invoke("plugin:api|begin_upload");
+    await invoke("begin_upload");
     return createMediaRecorderPromise(recorder);
   });
   const isRecording = () => resource.loading;
@@ -132,7 +132,7 @@ export function Provider(props: { children: JSX.Element }) {
       analyzer.fftSize = AUDIO_BUFFER_SIZE;
 
       const audioTracks = audioSelection.display?.getAudioTracks();
-      console.log(audioTracks)
+      console.log(audioTracks);
       if (audioTracks?.length && audioSelection.display) {
         const displaySource = audioCtx.createMediaStreamSource(
           audioSelection.display,

@@ -15,7 +15,7 @@ export function PeakRmsMeter() {
           let animationFrameId: number;
           async function loop() {
             audio().analyzer.getFloatTimeDomainData(buffer);
-            const rms: number = await invoke("plugin:api|get_rms", buffer);
+            const rms: number = await invoke("get_rms", buffer);
             setRmsValue(rms);
 
             animationFrameId = requestAnimationFrame(loop);

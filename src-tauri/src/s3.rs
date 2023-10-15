@@ -1,6 +1,6 @@
 use bytes::BytesMut;
 use rusty_s3::{
-    actions::{CompleteMultipartUpload, CreateMultipartUpload, UploadPart, DeleteObject},
+    actions::{CompleteMultipartUpload, CreateMultipartUpload, DeleteObject, UploadPart},
     Bucket, Credentials, S3Action,
 };
 use std::time::Duration;
@@ -27,8 +27,7 @@ impl S3Config {
 }
 
 #[derive(Debug)]
-struct InternalState {
-}
+struct InternalState {}
 
 #[derive(Debug)]
 struct InProgressUpload {
@@ -60,7 +59,6 @@ impl Default for UploadManager {
     }
 }
 
-
 pub struct CompletedData {
     pub upload_url: Url,
 }
@@ -89,7 +87,11 @@ impl InProgressUpload {
         self.buffer.extend_from_slice(slice);
     }
 
-    async fn upload_current_parts(&mut self, config: &S3Config, client: &Client) -> Result<(), AnyhowError> {
+    async fn upload_current_parts(
+        &mut self,
+        config: &S3Config,
+        client: &Client,
+    ) -> Result<(), AnyhowError> {
         let url = self.sign_part(config);
         let bytes = self.buffer.split().freeze();
         let len = bytes.len();
@@ -164,7 +166,12 @@ impl InProgressUpload {
 }
 
 impl InProgressUpload {
-    async fn complete_upload(&mut self, slice: &[u8], config: &S3Config, client: &Client) -> Result<CompletedData, AnyhowError> {
+    async fn complete_upload(
+        &mut self,
+        slice: &[u8],
+        config: &S3Config,
+        client: &Client,
+    ) -> Result<CompletedData, AnyhowError> {
         self.write_slice(slice);
         self.upload_current_parts(config, client).await?;
         let (url, body) = self.sign_complete_upload(config);
@@ -182,7 +189,12 @@ impl InProgressUpload {
         }
     }
 
-    async fn upload_part(&mut self, slice: &[u8], config: &S3Config, client: &Client) -> Result<(), AnyhowError> {
+    async fn upload_part(
+        &mut self,
+        slice: &[u8],
+        config: &S3Config,
+        client: &Client,
+    ) -> Result<(), AnyhowError> {
         self.write_slice(slice);
         if self.buffer.len() < 5 * 1024 * 1024 {
             return Ok(());
@@ -191,10 +203,12 @@ impl InProgressUpload {
     }
 }
 
-impl  UploadManager {
+impl UploadManager {
     pub async fn complete_upload(&mut self, slice: &[u8]) -> Result<CompletedData, AnyhowError> {
         let out = match &mut self.state {
-            ManagerState::InProgress(upload, config) => upload.complete_upload(slice, &config, &self.client).await,
+            ManagerState::InProgress(upload, config) => {
+                upload.complete_upload(slice, &config, &self.client).await
+            }
             _ => Err(anyhow::anyhow!("No upload in progress").into()),
         };
         self.make_idle()?;
@@ -223,17 +237,20 @@ impl  UploadManager {
 
     pub async fn upload_part(&mut self, slice: &[u8]) -> Result<(), AnyhowError> {
         match &mut self.state {
-            ManagerState::InProgress(upload, config) => upload.upload_part(slice, config, &self.client).await,
+            ManagerState::InProgress(upload, config) => {
+                upload.upload_part(slice, config, &self.client).await
+            }
             _ => Err(anyhow::anyhow!("No upload in progress").into()),
         }
     }
-
 
     pub async fn new_upload(&mut self, obj_name: String) -> Result<(), AnyhowError> {
         let conf: Result<S3Config, AnyhowError> = match &self.state {
             ManagerState::Idle(a) => Ok(a.clone()),
             ManagerState::NotInitialized => Err(anyhow::anyhow!("No internal s3 config").into()),
-            ManagerState::InProgress(_, _) => Err(anyhow::anyhow!("There is already an upload in progress").into()),
+            ManagerState::InProgress(_, _) => {
+                Err(anyhow::anyhow!("There is already an upload in progress").into())
+            }
         };
 
         let conf = conf?;
@@ -261,4 +278,3 @@ impl  UploadManager {
         Ok(())
     }
 }
-

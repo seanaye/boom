@@ -1,4 +1,3 @@
-
 use crate::{
     error::{AnyhowError, AppError},
     s3::S3Config,
@@ -61,7 +60,6 @@ pub trait List: Sized {
     async fn list(conn: &SqlitePool) -> Result<Vec<Self>, AnyhowError>;
 }
 
-
 #[derive(Debug, FromRow, Clone, Default, Validate, Serialize, Deserialize)]
 pub struct S3ConfigFields {
     #[validate(length(min = 1, message = "Required Field"))]
@@ -120,16 +118,17 @@ impl Read<i64> for S3ConfigRaw {
     ) -> Result<S3ConfigRaw, AnyhowError> {
         let id = i.identity();
 
-        Ok(sqlx::query_as::<_, Self>("SELECT * FROM s3config WHERE id = ?")
-            .bind(id)
-            .fetch_one(conn)
-            .await?)
+        Ok(
+            sqlx::query_as::<_, Self>("SELECT * FROM s3config WHERE id = ?")
+                .bind(id)
+                .fetch_one(conn)
+                .await?,
+        )
     }
 }
 
 #[async_trait]
 impl Update<i64, S3ConfigFields> for S3ConfigRaw {
-
     async fn update<U: Identity<i64> + Send>(
         i: U,
         input: S3ConfigFields,
@@ -154,7 +153,6 @@ impl Update<i64, S3ConfigFields> for S3ConfigRaw {
 
 #[async_trait]
 impl Delete<i64> for S3ConfigFields {
-
     async fn delete<U: Identity<i64> + Send>(
         i: U,
         conn: &SqlitePool,
@@ -202,7 +200,7 @@ impl S3ConfigRaw {
     }
 
     pub fn into_parts(self) -> (I64Id, S3ConfigFields) {
-        (I64Id{ id: self.id }, self.fields)
+        (I64Id { id: self.id }, self.fields)
     }
 }
 
@@ -221,14 +219,13 @@ impl SelectedConfig {
         )
     }
 
-    pub async fn set(
-        I64Id{id}: I64Id,
-        conn: &SqlitePool,
-    ) -> Result<(), AnyhowError> {
-            sqlx::query("INSERT OR REPLACE INTO selected_config (id, config_id) VALUES (0, ?) RETURNING *")
-                .bind(id)
-                .execute(conn)
-                .await?;
+    pub async fn set(I64Id { id }: I64Id, conn: &SqlitePool) -> Result<(), AnyhowError> {
+        sqlx::query(
+            "INSERT OR REPLACE INTO selected_config (id, config_id) VALUES (0, ?) RETURNING *",
+        )
+        .bind(id)
+        .execute(conn)
+        .await?;
         Ok(())
     }
 }
@@ -250,37 +247,51 @@ pub struct UploadBuilder {
     pub url: Url,
 }
 
-
 #[async_trait]
 impl Read<i64> for Upload {
     async fn read<U: Identity<i64> + Send>(i: U, conn: &SqlitePool) -> Result<Upload, AnyhowError> {
         let id = i.identity();
-        Ok(sqlx::query_as::<_, Upload>("SELECT * from uploads where id = ?")
-            .bind(id)
-            .fetch_one(conn)
-            .await?)
-
+        Ok(
+            sqlx::query_as::<_, Upload>("SELECT * from uploads where id = ?")
+                .bind(id)
+                .fetch_one(conn)
+                .await?,
+        )
     }
 }
 
 #[async_trait]
 impl Create<UploadBuilder> for Upload {
     async fn create(input: UploadBuilder, conn: &SqlitePool) -> Result<Upload, AppError> {
-        sqlx::query_as::<_, Upload>("INSERT INTO uploads (url) VALUES (?) RETURNING *").bind(input.url.to_string()).fetch_one(conn).await.map_err(AppError::anyhow)
+        sqlx::query_as::<_, Upload>("INSERT INTO uploads (url) VALUES (?) RETURNING *")
+            .bind(input.url.to_string())
+            .fetch_one(conn)
+            .await
+            .map_err(AppError::anyhow)
     }
 }
 
 #[async_trait]
 impl List for Upload {
     async fn list(conn: &SqlitePool) -> Result<Vec<Upload>, AnyhowError> {
-        Ok(sqlx::query_as::<_, Upload>("SELECT * from uploads ORDER BY id DESC").fetch_all(conn).await?)
+        Ok(
+            sqlx::query_as::<_, Upload>("SELECT * from uploads ORDER BY id DESC")
+                .fetch_all(conn)
+                .await?,
+        )
     }
 }
 
 #[async_trait]
 impl Delete<i64> for Upload {
-    async fn delete<U: Identity<i64> + Send>(i: U, conn: &SqlitePool) -> Result<SqliteQueryResult, AnyhowError> {
+    async fn delete<U: Identity<i64> + Send>(
+        i: U,
+        conn: &SqlitePool,
+    ) -> Result<SqliteQueryResult, AnyhowError> {
         let id = i.identity();
-        Ok(sqlx::query("DELETE FROM uploads WHERE id = ?").bind(id).execute(conn).await?)
+        Ok(sqlx::query("DELETE FROM uploads WHERE id = ?")
+            .bind(id)
+            .execute(conn)
+            .await?)
     }
 }
