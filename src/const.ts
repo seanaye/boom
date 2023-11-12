@@ -1,1 +1,1 @@
-export const AUDIO_BUFFER_SIZE = 2048;
+export const AUDIO_BUFFER_SIZE = 32;

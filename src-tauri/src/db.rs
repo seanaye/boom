@@ -3,6 +3,7 @@ use crate::{
     s3::S3Config,
 };
 use async_trait::async_trait;
+use mime::Mime;
 use rusty_s3::{Bucket, Credentials, UrlStyle};
 use serde::{Deserialize, Serialize};
 use sqlx::{sqlite::SqliteQueryResult, FromRow, SqlitePool};
@@ -235,6 +236,7 @@ pub struct Upload {
     id: i64,
     url: String,
     created_at: String,
+    mime_type: String,
 }
 
 impl Upload {
@@ -245,6 +247,7 @@ impl Upload {
 
 pub struct UploadBuilder {
     pub url: Url,
+    pub mime: Mime,
 }
 
 #[async_trait]
@@ -263,11 +266,14 @@ impl Read<i64> for Upload {
 #[async_trait]
 impl Create<UploadBuilder> for Upload {
     async fn create(input: UploadBuilder, conn: &SqlitePool) -> Result<Upload, AppError> {
-        sqlx::query_as::<_, Upload>("INSERT INTO uploads (url) VALUES (?) RETURNING *")
-            .bind(input.url.to_string())
-            .fetch_one(conn)
-            .await
-            .map_err(AppError::anyhow)
+        sqlx::query_as::<_, Upload>(
+            "INSERT INTO uploads (url, mime_type) VALUES (?, ?) RETURNING *",
+        )
+        .bind(input.url.to_string())
+        .bind(input.mime.to_string())
+        .fetch_one(conn)
+        .await
+        .map_err(AppError::anyhow)
     }
 }
 

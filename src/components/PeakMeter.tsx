@@ -1,9 +1,7 @@
 import { invoke } from "@tauri-apps/api";
 import { Show, createEffect, createSignal } from "solid-js";
-import { AUDIO_BUFFER_SIZE } from "../const";
 import { useAppContext } from "../Context";
 
-const buffer = new Float32Array(AUDIO_BUFFER_SIZE);
 export function PeakRmsMeter() {
   const ctx = useAppContext();
   const [rmsValue, setRmsValue] = createSignal(0);
@@ -14,7 +12,8 @@ export function PeakRmsMeter() {
         createEffect(() => {
           let animationFrameId: number;
           async function loop() {
-            audio().analyzer.getFloatTimeDomainData(buffer);
+            const buffer = audio().buffer;
+            audio().analyzer.getByteFrequencyData(buffer);
             const rms: number = await invoke("get_rms", buffer);
             setRmsValue(rms);
 
@@ -25,7 +24,7 @@ export function PeakRmsMeter() {
         });
         return (
           <>
-            <meter min="-100" max="10" value={rmsValue()} />
+            <meter max="1" value={rmsValue()} />
             <input
               oninput={(v) => {
                 const value = Number(v.currentTarget.value);
@@ -35,7 +34,7 @@ export function PeakRmsMeter() {
               }}
               type="range"
               min="0"
-              max="100"
+              max="5"
               value="1"
               step="0.01"
             />

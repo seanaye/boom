@@ -1,11 +1,14 @@
 use bytes::BytesMut;
+use mime::Mime;
 use rusty_s3::{
-    actions::{CompleteMultipartUpload, CreateMultipartUpload, DeleteObject, UploadPart},
+    actions::{
+        CompleteMultipartUpload, CreateMultipartUpload, DeleteObject, PutObject, UploadPart,
+    },
     Bucket, Credentials, S3Action,
 };
-use std::time::Duration;
-use tauri::http::header::ETAG;
-use tauri_plugin_http::reqwest::{Client, Url};
+use std::{borrow::Cow, time::Duration};
+use tauri::http::header::{CONTENT_TYPE, ETAG};
+use tauri_plugin_http::reqwest::{Body, Client, Url};
 
 use crate::error::AnyhowError;
 
@@ -62,12 +65,6 @@ impl Default for UploadManager {
 pub struct CompletedData {
     pub upload_url: Url,
 }
-
-// #[async_trait]
-// pub trait MultipartUploader: Sized {
-//     async fn upload_part(&self, slice: &[u8]) -> Result<(), AnyhowError>;
-//     async fn complete_upload(&self, slice: &[u8]) -> Result<CompletedData, AnyhowError>;
-// }
 
 impl InProgressUpload {
     fn sign_part(&mut self, config: &S3Config) -> Url {
@@ -244,7 +241,7 @@ impl UploadManager {
         }
     }
 
-    pub async fn new_upload(&mut self, obj_name: String) -> Result<(), AnyhowError> {
+    pub async fn new_multipart_upload(&mut self, obj_name: String) -> Result<(), AnyhowError> {
         let conf: Result<S3Config, AnyhowError> = match &self.state {
             ManagerState::Idle(a) => Ok(a.clone()),
             ManagerState::NotInitialized => Err(anyhow::anyhow!("No internal s3 config").into()),
@@ -276,5 +273,32 @@ impl UploadManager {
         dbg!(res.status());
         res.error_for_status()?;
         Ok(())
+    }
+
+    pub async fn new_upload(
+        &self,
+        obj_name: String,
+        bytes: impl Into<Body>,
+        mime: &Mime,
+    ) -> Result<CompletedData, AnyhowError> {
+        let conf = self.get_config()?;
+        let mut up = PutObject::new(&conf.bucket, Some(&conf.credentials), &obj_name);
+
+        let headers = up.headers_mut();
+        let content = Cow::from(CONTENT_TYPE.to_string());
+        headers.insert(content, mime.essence_str());
+        headers.insert("x-amz-acl", "public-read");
+        let signed = up.sign(Duration::from_secs(3600));
+        self.client
+            .put(signed)
+            .body(bytes)
+            .header(CONTENT_TYPE, mime.essence_str())
+            .header("x-amz-acl", "public-read")
+            .send()
+            .await?
+            .error_for_status()?;
+        let upload_url = conf.bucket.object_url(&obj_name)?;
+        dbg!("done upload");
+        Ok(CompletedData { upload_url })
     }
 }

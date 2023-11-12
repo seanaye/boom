@@ -376,6 +376,7 @@ dependencies = [
  "objc",
  "parking_lot",
  "rusty-s3",
+ "scopeguard",
  "screencapturekit",
  "screenshots",
  "serde",

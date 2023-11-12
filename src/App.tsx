@@ -1,27 +1,16 @@
-import { Uploads } from "./components/Uploads";
-import { S3ConfigFormList } from "./components/ConfigFormList";
-import { SelectDevices } from "./components/SelectDevices";
-import { RecordControls } from "./components/RecordControls";
-import { PeakRmsMeter } from "./components/PeakMeter";
-import { Provider } from "./Context";
+import { Router, Routes, Route, hashIntegration } from "@solidjs/router";
+import { lazy } from "solid-js";
 
-function App() {
+const Index = lazy(() => import("./pages/Index"));
+const Screenshot = lazy(() => import("./pages/Screenshot"));
+
+export default function App() {
   return (
-    <Provider>
-      <div class="rounded-xl p-4 bg-amber-100 text-zinc-600">
-        <div class="">
-          <div>
-            {/* <S3ConfigFormList /> */}
-            <RecordControls />
-            <SelectDevices />
-            {/* <CameraPreview /> */}
-            <PeakRmsMeter />
-            <Uploads />
-          </div>
-        </div>
-      </div>
-    </Provider>
+    <Router source={hashIntegration()}>
+      <Routes>
+        <Route path="/" component={Index} />
+        <Route path="/screenshot" component={Screenshot} />
+      </Routes>
+    </Router>
   );
 }
-
-export default App;

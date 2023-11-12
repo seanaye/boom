@@ -3,27 +3,28 @@
     windows_subsystem = "windows"
 )]
 
-use std::{borrow::Cow, path::PathBuf};
-
 use anyhow::Context;
 use db::{Create, Delete, I64Id, Read, S3ConfigFields, S3ConfigRaw, SelectedConfig, Update};
-use device_query::{DeviceEvents, DeviceQuery, DeviceState};
+use device_query::{DeviceEvents, DeviceState};
 use error::{AnyhowError, Validated};
+use image::ImageOutputFormat;
+use mime::{Mime, IMAGE_PNG};
 use plugin::ManagerLock;
 use s3::S3Config;
+use scopeguard::defer;
 use sqlx::SqlitePool;
+use std::{borrow::Cow, io::Cursor, path::PathBuf};
 use tauri::{
     command, generate_handler, ipc::InvokeBody, tray::ClickType, AppHandle, Manager, Runtime,
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 use tauri_plugin_positioner::{Position, WindowExt};
+use tokio::sync::{mpsc::UnboundedSender, RwLock};
 use uuid::Uuid;
 
-use crate::{
-    db::{List, Upload, UploadBuilder},
-    plugin::ScManager,
-};
+use crate::{db::{List, Upload, UploadBuilder}, screenshot::{create_screenshot_channel, ShortcutMessages, print_screen_shortcut, cancel_screen_shortcut}};
 
+mod consts;
 mod db;
 mod error;
 mod plugin;
@@ -31,97 +32,40 @@ mod rect;
 mod s3;
 mod screenshot;
 
-#[derive(Debug)]
-enum Action {
-    Up(usize),
-    Down(usize),
-}
-
 fn main() {
-    println!("{}", tauri::path::BaseDirectory::AppData.variable());
-
-    let print_screen_shortcut = Shortcut::new(Some(Modifiers::SHIFT | Modifiers::META), Code::KeyP);
-    let cancel_screen_shortcut = Shortcut::new(None, Code::Escape);
 
     let mut app = tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
         .plugin(plugin::Api::init("sqlite:boom.db").build())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::with_handler(move |app, shortcut| {
-                let app = app.clone();
-
-                match shortcut.id() {
-                    x if x == print_screen_shortcut.id() => {
-                        tauri::async_runtime::spawn(async move {
-                            let manager = &app.state::<ScManager>().0;
-                            manager.write().await.activate();
-                            app.global_shortcut()
-                                .register(cancel_screen_shortcut.clone());
-                            let device = DeviceState::new();
-                            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-                            let tx2 = tx.clone();
-                            let down_guard = device.on_mouse_down(move |button| {
-                                tx.send(Action::Down(button.clone()));
-                            });
-                            let up_guard = device.on_mouse_up(move |button| {
-                                tx2.send(Action::Up(button.clone()));
-                            });
-                            while let Some(button) = rx.recv().await {
-                                dbg!(&button);
-                                match button {
-                                    Action::Down(1) => {
-                                        if manager.write().await.start().is_err() {
-                                            dbg!("cant start, cancelling");
-                                            break;
-                                        }
-                                    }
-                                    Action::Up(1) => {
-                                        let out = manager.write().await.finish();
-                                        if let Ok(o) = out {
-                                            o.save("/Users/seanaye/temp.png");
-                                        }
-                                        break;
-                                    }
-                                    _ => {
-                                        dbg!("cant match {:?}, cancelling", &button);
-                                        break;
-                                    }
-                                }
-                            }
-                            app.global_shortcut()
-                                .unregister(cancel_screen_shortcut.clone());
-                            dbg!("dropping");
-                        });
-                    }
-                    x if x == cancel_screen_shortcut.id() => {
-                        tauri::async_runtime::spawn(async move {
-                            let manager = &app.state::<ScManager>().0;
-                            manager.write().await.cancel();
-                            &app.global_shortcut().unregister(cancel_screen_shortcut.clone());
-                        });
-                    }
-                    _ => (),
-                }
-            })
-            .build(),
-        )
-        // .on_window_event(|event| match event.event() {
-        //     tauri::WindowEvent::Focused(is_focused) => {
-        //         dbg!(is_focused);
-        //         if !is_focused {
-        //             event.window().hide();
-        //         }
-        //     }
-        //     _ => (),
-        // })
+        .plugin(screenshot::ScreenshotPlugin::init())
         .setup(move |app| {
+            let handle = app.handle();
+            let channel = create_screenshot_channel(&handle);
+            handle.plugin(
+                tauri_plugin_global_shortcut::Builder::with_handler(move |app, shortcut| {
+                    let tx = channel.clone();
+                    match shortcut.id() {
+                        x if x == print_screen_shortcut().id() => {
+                            tauri::async_runtime::spawn(async move {
+                                dbg!(tx.send(ShortcutMessages::Ready).await);
+                            });
+                        }
+                        x if x == cancel_screen_shortcut().id() => {
+                            tauri::async_runtime::spawn(async move {
+                                dbg!(tx.send(ShortcutMessages::Cancel).await);
+                            });
+                        }
+                        _ => {}
+                    }
+                })
+                .build(),
+            );
+            dbg!(app.global_shortcut().register(print_screen_shortcut()));
+
             let icon = tauri::Icon::File(PathBuf::from(
                 "/Users/seanaye/dev/boom/src-tauri/icons/icon.ico",
             ));
-            let shortcut = app.global_shortcut();
-            shortcut.register(print_screen_shortcut.clone());
-
             let tray = tauri::tray::TrayIconBuilder::new()
                 .icon(icon)
                 .on_tray_icon_event(|tray, event| {
@@ -132,16 +76,18 @@ fn main() {
                             dbg!("left click");
                             if let Some(window) = app.get_window("main") {
                                 let _ = window.move_window(Position::TrayCenter);
-                                let o = match window.is_visible() {
-                                    Ok(true) => Ok(()),
-                                    Ok(false) => {
-                                        window.show();
-                                        window.set_focus();
-                                        dbg!("showing");
-                                        Ok(())
-                                    }
-                                    Err(e) => Err(e),
-                                };
+                                window.show();
+                                window.set_focus();
+                                // let o = match window.is_visible() {
+                                //     Ok(true) => Ok(()),
+                                //     Ok(false) => {
+                                //         window.show();
+                                //         window.set_focus();
+                                //         dbg!("showing");
+                                //         Ok(())
+                                //     }
+                                //     Err(e) => Err(e),
+                                // };
                             }
                         }
                         _ => (),
@@ -238,7 +184,7 @@ async fn begin_upload<R: Runtime>(
     manager
         .write()
         .await
-        .new_upload(format!("{}.mp4", Uuid::new_v4()))
+        .new_multipart_upload(format!("{}.mp4", Uuid::new_v4()))
         .await?;
     window.hide();
     Ok(())
@@ -269,7 +215,8 @@ async fn upload_url_part<R: Runtime, 'a>(
                 .complete_upload(slice)
                 .await?
                 .upload_url;
-            let o = Upload::create(UploadBuilder { url }, &conn).await?;
+            let mime = "video/mp4".parse::<Mime>()?;
+            let o = Upload::create(UploadBuilder { url, mime }, &conn).await?;
             dbg!(&o);
             Ok(true)
         }
@@ -283,27 +230,18 @@ async fn list_uploads<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Upload>, Anyh
 }
 
 #[command]
-async fn get_rms<R: Runtime, 'a>(
+async fn get_rms<R: Runtime>(
     _app: AppHandle<R>,
-    request: tauri::ipc::Request<'a>,
+    request: tauri::ipc::Request<'_>,
 ) -> Result<f32, AnyhowError> {
     let slice: &[u8] = match request.body() {
         InvokeBody::Raw(b) => Ok(b),
         _ => Err(anyhow::anyhow!("expected raw bytes")),
     }?;
 
-    let f = unsafe {
-        let (_, f, _) = slice.align_to::<f32>();
-        f
-    };
+    let max = slice.iter().max().unwrap_or(&0).to_owned();
 
-    let mut rms = 0f32;
-    for &s in f {
-        rms += s * s;
-    }
-    rms /= f.len() as f32;
-
-    Ok(10f32 * rms.log10())
+    Ok(max as f32 / 255f32)
 }
 
 #[command]
@@ -312,13 +250,13 @@ async fn delete_upload<R: Runtime>(app: AppHandle<R>, id: i64) -> Result<(), Any
     let manager = &app.state::<ManagerLock>().0;
     let id = I64Id { id };
 
-    let url = Upload::read(&id, &pool).await?.url()?;
+    let url = Upload::read(id, &pool).await?.url()?;
     let mut path = Cow::from(url.path());
-    if path.starts_with("/") {
+    if path.starts_with('/') {
         path.to_mut().remove(0);
     }
 
     manager.read().await.delete(&path).await?;
-    Upload::delete(&id, &pool).await?;
+    Upload::delete(id, &pool).await?;
     Ok(())
 }

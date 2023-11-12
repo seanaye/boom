@@ -34,6 +34,7 @@ type AudioStreamData = {
   stream: MediaStream;
   analyzer: AnalyserNode;
   gainNode: GainNode;
+  buffer: Uint8Array;
 };
 
 type Context = {
@@ -105,7 +106,7 @@ export function Provider(props: { children: JSX.Element }) {
   const selectAudioContraints = (): MediaTrackConstraints | true => {
     const selected = selectedAudio();
     if (!selected) return true;
-    return { deviceId: { exact: selected } };
+    return { deviceId: { exact: selected }, autoGainControl: true  };
   };
 
   const [audioStream, { refetch: reloadAudioStream }] = createResource(
@@ -129,7 +130,11 @@ export function Provider(props: { children: JSX.Element }) {
       const destNode = audioCtx.createMediaStreamDestination();
       const analyzer = audioCtx.createAnalyser();
 
+      analyzer.minDecibels = -100;
+      analyzer.maxDecibels = 0;
+      analyzer.smoothingTimeConstant = 0.85;
       analyzer.fftSize = AUDIO_BUFFER_SIZE;
+      const buffer = new Uint8Array(analyzer.frequencyBinCount);
 
       const audioTracks = audioSelection.display?.getAudioTracks();
       console.log(audioTracks);
@@ -143,7 +148,7 @@ export function Provider(props: { children: JSX.Element }) {
       gainNode.connect(analyzer);
       gainNode.connect(destNode);
 
-      return { stream: destNode.stream, analyzer, gainNode };
+      return { stream: destNode.stream, analyzer, gainNode, buffer };
     },
   );
 
