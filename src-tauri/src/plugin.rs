@@ -1,4 +1,4 @@
-use crate::{get_s3_config, s3::UploadManager, screenshot::ScreenshotManager};
+use crate::{get_s3_config, s3::UploadManager};
 use sqlx::{migrate::MigrateDatabase, Pool, Sqlite, SqlitePool};
 use std::path::PathBuf;
 use tauri::{
@@ -6,7 +6,6 @@ use tauri::{
     plugin::{Builder as PluginBuilder, TauriPlugin},
     Manager, Runtime,
 };
-use tokio::sync::mpsc::UnboundedSender;
 
 pub struct Api {
     database_str: String,
@@ -39,8 +38,7 @@ impl Api {
 
     pub fn build<R: Runtime>(self) -> TauriPlugin<R, ()> {
         PluginBuilder::<R, ()>::new("api")
-            .setup(move |app, api| {
-                let config = api.config();
+            .setup(move |app, _api| {
                 let app_path = app.path().app_config_dir().expect("No app path found");
                 let fqdb = path_mapper(app_path, &self.database_str);
                 dbg!(&fqdb);

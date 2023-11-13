@@ -12,6 +12,9 @@ use mime::{Mime, IMAGE_PNG};
 use plugin::ManagerLock;
 use s3::S3Config;
 use scopeguard::defer;
+use screenshot::{
+    cancel_screen_shortcut, print_screen_shortcut, ScreenshotManagerExt, ScreenshotManagerLock,
+};
 use sqlx::SqlitePool;
 use std::{borrow::Cow, io::Cursor, path::PathBuf};
 use tauri::{
@@ -22,7 +25,7 @@ use tauri_plugin_positioner::{Position, WindowExt};
 use tokio::sync::{mpsc::UnboundedSender, RwLock};
 use uuid::Uuid;
 
-use crate::{db::{List, Upload, UploadBuilder}, screenshot::{create_screenshot_channel, ShortcutMessages, print_screen_shortcut, cancel_screen_shortcut}};
+use crate::db::{List, Upload, UploadBuilder};
 
 mod consts;
 mod db;
@@ -33,36 +36,28 @@ mod s3;
 mod screenshot;
 
 fn main() {
-
     let mut app = tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
         .plugin(plugin::Api::init("sqlite:boom.db").build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(screenshot::ScreenshotPlugin::init())
-        .setup(move |app| {
-            let handle = app.handle();
-            let channel = create_screenshot_channel(&handle);
-            handle.plugin(
-                tauri_plugin_global_shortcut::Builder::with_handler(move |app, shortcut| {
-                    let tx = channel.clone();
-                    match shortcut.id() {
-                        x if x == print_screen_shortcut().id() => {
-                            tauri::async_runtime::spawn(async move {
-                                dbg!(tx.send(ShortcutMessages::Ready).await);
-                            });
-                        }
-                        x if x == cancel_screen_shortcut().id() => {
-                            tauri::async_runtime::spawn(async move {
-                                dbg!(tx.send(ShortcutMessages::Cancel).await);
-                            });
-                        }
-                        _ => {}
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::with_handler(
+                move |app, shortcut| match shortcut.id() {
+                    x if x == print_screen_shortcut().id() => {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move { app.screenshot_manager().inner().write().await.start() });
                     }
-                })
-                .build(),
-            );
-            dbg!(app.global_shortcut().register(print_screen_shortcut()));
-
+                    x if x == cancel_screen_shortcut().id() => {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move { app.screenshot_manager().inner().write().await.cancel() });
+                    }
+                    _ => {}
+                },
+            )
+            .build(),
+        )
+        .setup(move |app| {
             let icon = tauri::Icon::File(PathBuf::from(
                 "/Users/seanaye/dev/boom/src-tauri/icons/icon.ico",
             ));
