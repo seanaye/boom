@@ -15,7 +15,7 @@ use screenshot::{
 use sqlx::SqlitePool;
 use std::{borrow::Cow, path::PathBuf};
 use tauri::{
-    generate_handler, ipc::InvokeBody, tray::ClickType, AppHandle, Manager, Runtime, State,
+    generate_handler, ipc::InvokeBody, tray::ClickType, Manager, State,
 };
 
 use tauri_plugin_positioner::{Position, WindowExt};
