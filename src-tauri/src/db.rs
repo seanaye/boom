@@ -8,7 +8,6 @@ use rusty_s3::{Bucket, Credentials, UrlStyle};
 use serde::{Deserialize, Serialize};
 use sqlx::{sqlite::SqliteQueryResult, FromRow, SqlitePool};
 use tauri_plugin_http::reqwest::Url;
-use specta::Type;
 use validator::Validate;
 
 trait Identity<T> {
@@ -232,7 +231,7 @@ impl SelectedConfig {
     }
 }
 
-#[derive(FromRow, Serialize, Deserialize, Debug, Type)]
+#[derive(FromRow, Serialize, Deserialize, Debug)]
 pub struct Upload {
     id: i64,
     url: String,
