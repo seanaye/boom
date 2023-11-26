@@ -10,16 +10,16 @@ use mime::Mime;
 use plugin::ManagerLock;
 use s3::S3Config;
 use screenshot::{
-    cancel_screen_shortcut, print_screen_shortcut, ScreenshotManagerExt, ScreenshotManagerLock,
+    cancel_screen_shortcut, print_screen_shortcut, ScreenshotManagerExt,
 };
 use sqlx::SqlitePool;
-use std::{borrow::Cow, io::Cursor, path::PathBuf};
+use std::{borrow::Cow, path::PathBuf};
 use tauri::{
-    command, generate_handler, ipc::InvokeBody, tray::ClickType, AppHandle, Manager, Runtime,
+    generate_handler, ipc::InvokeBody, tray::ClickType, AppHandle, Manager, Runtime,
 };
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
+
 use tauri_plugin_positioner::{Position, WindowExt};
-use tokio::sync::{mpsc::UnboundedSender, RwLock};
+
 use uuid::Uuid;
 
 use crate::{db::{List, Upload, UploadBuilder}, consts::WindowLabel};
@@ -59,7 +59,7 @@ fn main() {
             let icon = tauri::Icon::File(PathBuf::from(
                 "/Users/seanaye/dev/boom/src-tauri/icons/icon.ico",
             ));
-            let tray = tauri::tray::TrayIconBuilder::new()
+            let _tray = tauri::tray::TrayIconBuilder::new()
                 .icon(icon)
                 .on_tray_icon_event(|tray, event| {
                     let app = tray.app_handle();
@@ -117,7 +117,7 @@ async fn list_configs<R: Runtime>(app: AppHandle<R>) -> Result<Vec<S3ConfigRaw>,
     println!("list_configs");
 
     let s = app.state::<SqlitePool>();
-    Ok(S3ConfigRaw::list(&s).await?)
+    S3ConfigRaw::list(&s).await
 }
 
 #[tauri::command]
@@ -165,7 +165,7 @@ async fn set_selected<R: Runtime>(app: AppHandle<R>, config_id: i64) -> Result<(
 }
 
 async fn get_s3_config(pool: &SqlitePool) -> Result<S3Config, AnyhowError> {
-    Ok(SelectedConfig::get(&pool)
+    Ok(SelectedConfig::get(pool)
         .await?
         .context("No config selected")?
         .build()?)

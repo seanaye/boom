@@ -108,7 +108,7 @@ impl InProgressUpload {
         self.etags.push(
             etag.to_str()
                 .expect("Etag is always ascii")
-                .replace("\"", "")
+                .replace('\"', "")
                 .to_owned(),
         );
         self.total_size += len;
@@ -204,7 +204,7 @@ impl UploadManager {
     pub async fn complete_upload(&mut self, slice: &[u8]) -> Result<CompletedData, AnyhowError> {
         let out = match &mut self.state {
             ManagerState::InProgress(upload, config) => {
-                upload.complete_upload(slice, &config, &self.client).await
+                upload.complete_upload(slice, config, &self.client).await
             }
             _ => Err(anyhow::anyhow!("No upload in progress").into()),
         };
@@ -226,8 +226,8 @@ impl UploadManager {
 
     fn get_config(&self) -> Result<&S3Config, AnyhowError> {
         match &self.state {
-            ManagerState::InProgress(_, conf) => Ok(&conf),
-            ManagerState::Idle(conf) => Ok(&conf),
+            ManagerState::InProgress(_, conf) => Ok(conf),
+            ManagerState::Idle(conf) => Ok(conf),
             _ => Err(anyhow::anyhow!("No internal s3 config").into()),
         }
     }

@@ -135,7 +135,7 @@ impl Update<i64, S3ConfigFields> for S3ConfigRaw {
         input: S3ConfigFields,
         conn: &SqlitePool,
     ) -> Result<S3ConfigRaw, AppError> {
-        input.validate().map_err(|e| AppError::ValidationError(e))?;
+        input.validate().map_err(AppError::ValidationError)?;
         let id = i.identity();
 
         sqlx::query_as::<_, Self>("UPDATE s3config SET private_key = ?, public_key = ?, nickname = ?, endpoint = ?, region = ?, bucket_name = ?, host_rewrite = ? WHERE id = ?")
