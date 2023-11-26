@@ -1,16 +1,20 @@
 import { invoke } from "@tauri-apps/api/primitives";
 import { createStore } from "solid-js/store";
 
-export function CreateS3ConfigForm() {
-  const [form, setForm] = createStore({
-    nickname: "",
-    endpoint: "",
-    region: "",
-    bucket_name: "",
-    host_rewrite: "",
-    public_key: "",
-    private_key: "",
-  });
+const defaultState = {
+  nickname: "",
+  endpoint: "",
+  region: "",
+  bucket_name: "",
+  host_rewrite: "",
+  public_key: "",
+  private_key: "",
+};
+
+type FormState = typeof defaultState;
+
+export function EditS3ConfigForm(props: { initialForm?: FormState }) {
+  const [form, setForm] = createStore(props.initialForm ?? defaultState);
 
   const updateFormField = (fieldName: string) => (event: Event) => {
     const inputElement = event.currentTarget as HTMLInputElement;

@@ -9,6 +9,8 @@ import {
   Show,
 } from "solid-js";
 import { useAppContext } from "../Context";
+import { Details } from "./Details";
+import { IconButton } from "./IconButton";
 
 export function Uploads() {
   const ctx = useAppContext();
@@ -61,46 +63,51 @@ function Upload(props: {
   });
   const datestr = new Date(props.created_at).toLocaleString();
   return (
-    <details>
-      <summary class="grid grid-cols-7 py-2 items-center">
-        <div class="col-span-4 flex flex-row items-center gap-2">
-          <Icon mime_type={props.mime_type} />
-          {datestr}
-        </div>
-        {/* <div>{(deletion.error as Error)?.message}</div> */}
-        <div class="mx-auto col-span-1">
-          <button
-            onclick={() => setDelSignal(true)}
-            disabled={deletion.loading}
-            class="rounded bg-gray-100 p-2 shadow mx-auto"
-          >
-            <Show
-              when={deletion.loading}
-              fallback={<div class="i-heroicons-trash-20-solid" />}
+    <Details
+      summary={
+        <summary class="grid grid-cols-7 py-2 items-center">
+          <div class="col-span-4 flex flex-row items-center gap-2">
+            <Icon mime_type={props.mime_type} />
+            {datestr}
+          </div>
+          {/* <div>{(deletion.error as Error)?.message}</div> */}
+          <div class="mx-auto col-span-1">
+            <IconButton
+              as="button"
+              onclick={() => setDelSignal(true)}
+              disabled={deletion.loading}
             >
-              ...
-            </Show>
-          </button>
-        </div>
-        <div class="mx-auto col-span-1">
-          <button
-            onclick={() =>
-              setCopySignal(`https://vidview.deno.dev/?v=${props.url}`)
-            }
-            disabled={copied.loading}
-            class="rounded bg-gray-100 p-2 shadow mx-auto text-zinc-500"
-          >
-            <Show
-              when={copied.loading}
-              fallback={<div class="i-heroicons-clipboard-document-20-solid" />}
+              <Show
+                when={deletion.loading}
+                fallback={<div class="i-heroicons-trash-20-solid" />}
+              >
+                ...
+              </Show>
+            </IconButton>
+          </div>
+          <div class="mx-auto col-span-1">
+            <IconButton
+              as="button"
+              onclick={() =>
+                setCopySignal(`https://vidview.deno.dev/?v=${props.url}`)
+              }
+              disabled={copied.loading}
             >
-              <div class="i-heroicons-clipboard-document-check-20-solid" />
-            </Show>
-          </button>
-        </div>
-      </summary>
+              <Show
+                when={copied.loading}
+                fallback={
+                  <div class="i-heroicons-clipboard-document-20-solid" />
+                }
+              >
+                <div class="i-heroicons-clipboard-document-check-20-solid" />
+              </Show>
+            </IconButton>
+          </div>
+        </summary>
+      }
+    >
       <Media mime_type={props.mime_type} src={props.url} />
-    </details>
+    </Details>
   );
 }
 

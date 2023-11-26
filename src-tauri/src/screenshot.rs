@@ -138,7 +138,6 @@ impl<R: Runtime> ScreenshotManager<R> {
                     let mime = IMAGE_PNG;
                     let url = app
                         .state::<ManagerLock>()
-                        .0
                         .read()
                         .await
                         .new_upload(

@@ -15,7 +15,7 @@ use screenshot::{
 use sqlx::SqlitePool;
 use std::{borrow::Cow, path::PathBuf};
 use tauri::{
-    generate_handler, ipc::InvokeBody, tray::ClickType, AppHandle, Manager, Runtime,
+    generate_handler, ipc::InvokeBody, tray::ClickType, AppHandle, Manager, Runtime, State,
 };
 
 use tauri_plugin_positioner::{Position, WindowExt};
@@ -91,6 +91,7 @@ fn main() {
                 })
                 .icon_as_template(true)
                 .build(app)?;
+
             Ok(())
         })
         .invoke_handler(generate_handler![
@@ -113,53 +114,44 @@ fn main() {
 }
 
 #[tauri::command]
-async fn list_configs<R: Runtime>(app: AppHandle<R>) -> Result<Vec<S3ConfigRaw>, AnyhowError> {
-    println!("list_configs");
-
-    let s = app.state::<SqlitePool>();
+async fn list_configs(s: State<'_, SqlitePool>) -> Result<Vec<S3ConfigRaw>, AnyhowError> {
     S3ConfigRaw::list(&s).await
 }
 
 #[tauri::command]
-async fn create_config<R: Runtime>(
-    app: AppHandle<R>,
+async fn create_config(
+    s: State<'_, SqlitePool>,
     config: S3ConfigFields,
 ) -> Result<Validated<S3ConfigRaw>, AnyhowError> {
-    let s = app.state::<SqlitePool>();
     S3ConfigRaw::create(config, &s).await.try_into()
 }
 
 #[tauri::command]
-async fn update_config<R: Runtime>(
-    app: AppHandle<R>,
+async fn update_config(
+    s: State<'_, SqlitePool>,
     config: S3ConfigRaw,
 ) -> Result<Validated<S3ConfigRaw>, AnyhowError> {
-    let s = app.state::<SqlitePool>();
     let (id, fields) = config.into_parts();
     S3ConfigRaw::update(id, fields, &s).await.try_into()
 }
 
 #[tauri::command]
-async fn delete_config<R: Runtime>(app: AppHandle<R>, config_id: i64) -> Result<(), AnyhowError> {
-    let s = app.state::<SqlitePool>();
+async fn delete_config(s: State<'_, SqlitePool>, config_id: i64) -> Result<(), AnyhowError> {
     S3ConfigFields::delete(I64Id { id: config_id }, &s).await?;
     Ok(())
 }
 
 #[tauri::command]
-async fn get_selected<R: Runtime>(app: AppHandle<R>) -> Result<Option<S3ConfigRaw>, AnyhowError> {
-    let s = app.state::<SqlitePool>();
+async fn get_selected(s: State<'_, SqlitePool>) -> Result<Option<S3ConfigRaw>, AnyhowError> {
     SelectedConfig::get(&s).await
 }
 
 #[tauri::command]
-async fn set_selected<R: Runtime>(app: AppHandle<R>, config_id: i64) -> Result<(), AnyhowError> {
-    let s = app.state::<SqlitePool>();
+async fn set_selected(s: State<'_, SqlitePool>, manager: State<'_, ManagerLock>, config_id: i64) -> Result<(), AnyhowError> {
     SelectedConfig::set(I64Id { id: config_id }, &s).await?;
     let conf = SelectedConfig::get(&s)
         .await?
         .context("No config selected")?;
-    let manager = &app.state::<ManagerLock>().0;
     manager.write().await.set_config(conf.build()?)?;
     Ok(())
 }
@@ -172,27 +164,25 @@ async fn get_s3_config(pool: &SqlitePool) -> Result<S3Config, AnyhowError> {
 }
 
 #[tauri::command]
-async fn begin_upload<R: Runtime>(
-    app: AppHandle<R>,
+async fn begin_upload(
+    manager: State<'_, ManagerLock>,
     window: tauri::Window,
 ) -> Result<(), AnyhowError> {
-    let manager = &app.state::<ManagerLock>().0;
     manager
         .write()
         .await
         .new_multipart_upload(format!("{}.mp4", Uuid::new_v4()))
         .await?;
-    window.hide();
+    let _ = window.hide();
     Ok(())
 }
 
 #[tauri::command]
-async fn upload_url_part<R: Runtime, 'a>(
-    app: AppHandle<R>,
+async fn upload_url_part<'a>(
+    manager: State<'_, ManagerLock>,
+    conn: State<'_, SqlitePool>,
     request: tauri::ipc::Request<'a>,
 ) -> Result<bool, AnyhowError> {
-    let manager = &app.state::<ManagerLock>().0;
-    let conn = app.state::<SqlitePool>();
 
     let slice: &[u8] = match request.body() {
         InvokeBody::Raw(b) => Ok(b),
@@ -220,14 +210,12 @@ async fn upload_url_part<R: Runtime, 'a>(
 }
 
 #[tauri::command]
-async fn list_uploads<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Upload>, AnyhowError> {
-    let pool = app.state::<SqlitePool>();
+async fn list_uploads(pool: State<'_, SqlitePool>) -> Result<Vec<Upload>, AnyhowError> {
     Upload::list(&pool).await
 }
 
 #[tauri::command]
-async fn get_rms<R: Runtime>(
-    _app: AppHandle<R>,
+async fn get_rms(
     request: tauri::ipc::Request<'_>,
 ) -> Result<f32, AnyhowError> {
     let slice: &[u8] = match request.body() {
@@ -241,9 +229,7 @@ async fn get_rms<R: Runtime>(
 }
 
 #[tauri::command]
-async fn delete_upload<R: Runtime>(app: AppHandle<R>, id: i64) -> Result<(), AnyhowError> {
-    let pool = app.state::<SqlitePool>();
-    let manager = &app.state::<ManagerLock>().0;
+async fn delete_upload(manager: State<'_, ManagerLock>, pool: State<'_, SqlitePool>, id: i64) -> Result<(), AnyhowError> {
     let id = I64Id { id };
 
     let url = Upload::read(id, &pool).await?.url()?;
@@ -256,5 +242,9 @@ async fn delete_upload<R: Runtime>(app: AppHandle<R>, id: i64) -> Result<(), Any
     Upload::delete(id, &pool).await?;
     Ok(())
 }
+
+
+
+
 
 
