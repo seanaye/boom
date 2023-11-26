@@ -5,13 +5,10 @@
 
 use anyhow::Context;
 use db::{Create, Delete, I64Id, Read, S3ConfigFields, S3ConfigRaw, SelectedConfig, Update};
-use device_query::{DeviceEvents, DeviceState};
 use error::{AnyhowError, Validated};
-use image::ImageOutputFormat;
-use mime::{Mime, IMAGE_PNG};
+use mime::Mime;
 use plugin::ManagerLock;
 use s3::S3Config;
-use scopeguard::defer;
 use screenshot::{
     cancel_screen_shortcut, print_screen_shortcut, ScreenshotManagerExt, ScreenshotManagerLock,
 };
@@ -25,7 +22,7 @@ use tauri_plugin_positioner::{Position, WindowExt};
 use tokio::sync::{mpsc::UnboundedSender, RwLock};
 use uuid::Uuid;
 
-use crate::db::{List, Upload, UploadBuilder};
+use crate::{db::{List, Upload, UploadBuilder}, consts::WindowLabel};
 
 mod consts;
 mod db;
@@ -36,6 +33,7 @@ mod s3;
 mod screenshot;
 
 fn main() {
+
     let mut app = tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
         .plugin(plugin::Api::init("sqlite:boom.db").build())
@@ -69,22 +67,25 @@ fn main() {
                     match event.click_type {
                         ClickType::Left => {
                             dbg!("left click");
-                            if let Some(window) = app.get_window("main") {
+                            if let Some(window) = app.get_window(WindowLabel::Main.into()) {
                                 let _ = window.move_window(Position::TrayCenter);
-                                window.show();
-                                window.set_focus();
-                                // let o = match window.is_visible() {
-                                //     Ok(true) => Ok(()),
-                                //     Ok(false) => {
-                                //         window.show();
-                                //         window.set_focus();
-                                //         dbg!("showing");
-                                //         Ok(())
-                                //     }
-                                //     Err(e) => Err(e),
-                                // };
+                                let _ = match window.is_focused() {
+                                    Ok(true) => { 
+                                        let _ = window.hide();
+                                        Ok(())
+                                    },
+                                    Ok(false) => {
+                                        let _ = window.show();
+                                        let _ = window.set_focus();
+                                        Ok(())
+                                    }
+                                    Err(e) => Err(e),
+                                };
                             }
-                        }
+                        },
+                        ClickType::Right => {
+                            dbg!("right click");
+                        },
                         _ => (),
                     }
                 })
@@ -111,7 +112,7 @@ fn main() {
     app.run(|_, _| {})
 }
 
-#[command]
+#[tauri::command]
 async fn list_configs<R: Runtime>(app: AppHandle<R>) -> Result<Vec<S3ConfigRaw>, AnyhowError> {
     println!("list_configs");
 
@@ -119,7 +120,7 @@ async fn list_configs<R: Runtime>(app: AppHandle<R>) -> Result<Vec<S3ConfigRaw>,
     Ok(S3ConfigRaw::list(&s).await?)
 }
 
-#[command]
+#[tauri::command]
 async fn create_config<R: Runtime>(
     app: AppHandle<R>,
     config: S3ConfigFields,
@@ -128,7 +129,7 @@ async fn create_config<R: Runtime>(
     S3ConfigRaw::create(config, &s).await.try_into()
 }
 
-#[command]
+#[tauri::command]
 async fn update_config<R: Runtime>(
     app: AppHandle<R>,
     config: S3ConfigRaw,
@@ -138,20 +139,20 @@ async fn update_config<R: Runtime>(
     S3ConfigRaw::update(id, fields, &s).await.try_into()
 }
 
-#[command]
+#[tauri::command]
 async fn delete_config<R: Runtime>(app: AppHandle<R>, config_id: i64) -> Result<(), AnyhowError> {
     let s = app.state::<SqlitePool>();
     S3ConfigFields::delete(I64Id { id: config_id }, &s).await?;
     Ok(())
 }
 
-#[command]
+#[tauri::command]
 async fn get_selected<R: Runtime>(app: AppHandle<R>) -> Result<Option<S3ConfigRaw>, AnyhowError> {
     let s = app.state::<SqlitePool>();
     SelectedConfig::get(&s).await
 }
 
-#[command]
+#[tauri::command]
 async fn set_selected<R: Runtime>(app: AppHandle<R>, config_id: i64) -> Result<(), AnyhowError> {
     let s = app.state::<SqlitePool>();
     SelectedConfig::set(I64Id { id: config_id }, &s).await?;
@@ -170,7 +171,7 @@ async fn get_s3_config(pool: &SqlitePool) -> Result<S3Config, AnyhowError> {
         .build()?)
 }
 
-#[command]
+#[tauri::command]
 async fn begin_upload<R: Runtime>(
     app: AppHandle<R>,
     window: tauri::Window,
@@ -185,7 +186,7 @@ async fn begin_upload<R: Runtime>(
     Ok(())
 }
 
-#[command]
+#[tauri::command]
 async fn upload_url_part<R: Runtime, 'a>(
     app: AppHandle<R>,
     request: tauri::ipc::Request<'a>,
@@ -218,13 +219,13 @@ async fn upload_url_part<R: Runtime, 'a>(
     }
 }
 
-#[command]
+#[tauri::command]
 async fn list_uploads<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Upload>, AnyhowError> {
     let pool = app.state::<SqlitePool>();
     Upload::list(&pool).await
 }
 
-#[command]
+#[tauri::command]
 async fn get_rms<R: Runtime>(
     _app: AppHandle<R>,
     request: tauri::ipc::Request<'_>,
@@ -239,7 +240,7 @@ async fn get_rms<R: Runtime>(
     Ok(max as f32 / 255f32)
 }
 
-#[command]
+#[tauri::command]
 async fn delete_upload<R: Runtime>(app: AppHandle<R>, id: i64) -> Result<(), AnyhowError> {
     let pool = app.state::<SqlitePool>();
     let manager = &app.state::<ManagerLock>().0;
@@ -255,3 +256,5 @@ async fn delete_upload<R: Runtime>(app: AppHandle<R>, id: i64) -> Result<(), Any
     Upload::delete(id, &pool).await?;
     Ok(())
 }
+
+

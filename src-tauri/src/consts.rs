@@ -16,9 +16,19 @@ impl Display for WindowLabel {
     }
 }
 
-impl Into<String> for WindowLabel {
-    fn into(self) -> String {
-        self.to_string()
+impl From<WindowLabel> for String {
+    fn from(val: WindowLabel) -> Self {
+        let a: &'static str = val.into();
+        a.to_string()
+    }
+}
+
+impl From<WindowLabel> for &'static str {
+    fn from(val: WindowLabel) -> Self {
+        match val {
+            WindowLabel::Main => "main",
+            WindowLabel::Overlay => "overlay",
+        }
     }
 }
 

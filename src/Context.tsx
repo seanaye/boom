@@ -8,7 +8,7 @@ import {
   createSignal,
   useContext,
 } from "solid-js";
-import { invoke } from "@tauri-apps/api";
+import { invoke } from "@tauri-apps/api/primitives";
 import { AUDIO_BUFFER_SIZE } from "./const";
 
 function createMediaRecorderPromise(mediaRecorder: MediaRecorder) {
@@ -106,7 +106,7 @@ export function Provider(props: { children: JSX.Element }) {
   const selectAudioContraints = (): MediaTrackConstraints | true => {
     const selected = selectedAudio();
     if (!selected) return true;
-    return { deviceId: { exact: selected }, autoGainControl: true  };
+    return { deviceId: { exact: selected }, autoGainControl: true };
   };
 
   const [audioStream, { refetch: reloadAudioStream }] = createResource(

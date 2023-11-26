@@ -9,14 +9,11 @@ dependencies:
     specifier: ^0.8.3
     version: 0.8.3(solid-js@1.7.11)
   '@tauri-apps/api':
-    specifier: 2.0.0-alpha.8
-    version: 2.0.0-alpha.8
+    specifier: 2.0.0-alpha.11
+    version: 2.0.0-alpha.11
   '@tauri-apps/plugin-clipboard-manager':
-    specifier: 2.0.0-alpha.1
-    version: 2.0.0-alpha.1
-  '@tauri-apps/plugin-http':
-    specifier: 2.0.0-alpha.1
-    version: 2.0.0-alpha.1
+    specifier: 2.0.0-alpha.3
+    version: 2.0.0-alpha.3
   solid-js:
     specifier: ^1.7.11
     version: 1.7.11
@@ -503,14 +500,9 @@ packages:
       solid-js: 1.7.11
     dev: false
 
-  /@tauri-apps/api@2.0.0-alpha.6:
-    resolution: {integrity: sha512-ZMOc3eu9amwvkC6M69h3hWt4/EsFaAXmtkiw4xd2LN59/lTb4ZQiVfq2QKlRcu1rj3n/Tcr7U30ZopvHwXBGIg==}
-    engines: {node: '>= 14.6.0', npm: '>= 6.6.0', yarn: '>= 1.19.1'}
-    dev: false
-
-  /@tauri-apps/api@2.0.0-alpha.8:
-    resolution: {integrity: sha512-3hZ+7EzUA11KN+O/Y4KgmjR+ldhXLdNllkw//hv/AaNsktEopCRBuKfVRLzVK3yov+Z+GzgxqFlwgJ1v6g1iKw==}
-    engines: {node: '>= 14.6.0', npm: '>= 6.6.0', yarn: '>= 1.19.1'}
+  /@tauri-apps/api@2.0.0-alpha.11:
+    resolution: {integrity: sha512-aw7jic+MQAe/LH4fYhbd3bwx3YjXhDIwqKJIn5QO4yKmGdVURIhZSFcyeKkSe4P6Itdto0Pcz99vLfkgBwdQKw==}
+    engines: {node: '>= 18', npm: '>= 6.6.0', yarn: '>= 1.19.1'}
     dev: false
 
   /@tauri-apps/cli-darwin-arm64@1.1.0:
@@ -610,16 +602,10 @@ packages:
       '@tauri-apps/cli-win32-x64-msvc': 1.1.0
     dev: true
 
-  /@tauri-apps/plugin-clipboard-manager@2.0.0-alpha.1:
-    resolution: {integrity: sha512-zXybHu31RCx58ZGU7/kUHcvoXW2AX6kBXBZsKHv4rYe7Z869WmDLDC7iU23/dAJLu7xAPTJzJ/HbeMfbrfJ4hg==}
+  /@tauri-apps/plugin-clipboard-manager@2.0.0-alpha.3:
+    resolution: {integrity: sha512-Lo30EM8VRo9bYMeRHhZT65OUgajbxaK1A9UhD7/9VZIFoWGbzKU/jrP78mcJ77lc+RrcCcSJvkAgOaLtuOlhxw==}
     dependencies:
-      '@tauri-apps/api': 2.0.0-alpha.6
-    dev: false
-
-  /@tauri-apps/plugin-http@2.0.0-alpha.1:
-    resolution: {integrity: sha512-Ss9tR7JWmOcQEbHRdXXjjd+3nIPurqvuJwduIFrU3z0DQ0A+gtWVgyNMrQm+PAtJvw7FZlZDt8YMNIi7eEkJHg==}
-    dependencies:
-      '@tauri-apps/api': 2.0.0-alpha.6
+      '@tauri-apps/api': 2.0.0-alpha.11
     dev: false
 
   /@types/babel__core@7.20.1:

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api";
+import { invoke } from "@tauri-apps/api/primitives";
 import { Show, createEffect, createSignal } from "solid-js";
 import { useAppContext } from "../Context";
 
@@ -34,7 +34,7 @@ export function PeakRmsMeter() {
               }}
               type="range"
               min="0"
-              max="5"
+              max="10"
               value="1"
               step="0.01"
             />

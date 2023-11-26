@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api";
+import { invoke } from "@tauri-apps/api/primitives";
 import { createStore } from "solid-js/store";
 
 export function CreateS3ConfigForm() {
