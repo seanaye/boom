@@ -1,13 +1,11 @@
-use crate::{get_s3_config, s3::UploadManager};
 use sqlx::{migrate::MigrateDatabase, Pool, Sqlite, SqlitePool};
-use std::{path::PathBuf, fs::create_dir_all};
+use std::{fs::create_dir_all, path::PathBuf};
 use tauri::{
-    async_runtime::RwLock,
     plugin::{Builder as PluginBuilder, TauriPlugin},
     Manager, Runtime,
 };
 
-pub struct Api {
+pub struct DatabasePlugin {
     database_str: String,
 }
 
@@ -27,9 +25,8 @@ fn path_mapper(mut app_path: PathBuf, connection_string: &str) -> String {
     )
 }
 
-pub type ManagerLock = RwLock<UploadManager>;
 
-impl Api {
+impl DatabasePlugin {
     pub fn init(database_str: &str) -> Self {
         Self {
             database_str: database_str.to_owned(),
@@ -48,18 +45,10 @@ impl Api {
                     }
                     let pool: SqlitePool = Pool::connect(&fqdb).await?;
                     sqlx::migrate!("../migrations").run(&pool).await?;
-                    let mut manager = UploadManager::default();
-                    if let Ok(config) = get_s3_config(&pool).await {
-                        let _ = manager.set_config(config);
-                    }
                     app.manage(pool);
-                    app.manage::<ManagerLock>(RwLock::new(manager));
-
                     Ok(())
                 })
             })
             .build()
     }
 }
-
-

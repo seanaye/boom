@@ -1,6 +1,5 @@
 use crate::{
-    error::{AnyhowError, AppError},
-    s3::S3Config,
+    error::{AnyhowError, AppError}, s3::uploader::S3Config,
 };
 use async_trait::async_trait;
 use mime::Mime;
@@ -10,22 +9,13 @@ use sqlx::{sqlite::SqliteQueryResult, FromRow, SqlitePool};
 use tauri_plugin_http::reqwest::Url;
 use validator::Validate;
 
-trait Identity<T> {
+pub trait Identity<T> {
     fn identity(&self) -> T;
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
-pub struct I64Id {
-    pub id: i64,
-}
-impl Identity<i64> for I64Id {
+impl Identity<i64> for i64 {
     fn identity(&self) -> i64 {
-        self.id
-    }
-}
-impl Identity<i64> for &I64Id {
-    fn identity(&self) -> i64 {
-        self.id
+        *self
     }
 }
 
@@ -200,8 +190,8 @@ impl S3ConfigRaw {
         Ok(S3Config::new(bucket, credentials, self.fields.host_rewrite))
     }
 
-    pub fn into_parts(self) -> (I64Id, S3ConfigFields) {
-        (I64Id { id: self.id }, self.fields)
+    pub fn into_parts(self) -> (i64, S3ConfigFields) {
+        (self.id, self.fields)
     }
 }
 
@@ -220,11 +210,11 @@ impl SelectedConfig {
         )
     }
 
-    pub async fn set(I64Id { id }: I64Id, conn: &SqlitePool) -> Result<(), AnyhowError> {
+    pub async fn set(id: impl Identity<i64>, conn: &SqlitePool) -> Result<(), AnyhowError> {
         sqlx::query(
             "INSERT OR REPLACE INTO selected_config (id, config_id) VALUES (0, ?) RETURNING *",
         )
-        .bind(id)
+        .bind(id.identity())
         .execute(conn)
         .await?;
         Ok(())

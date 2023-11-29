@@ -1,6 +1,5 @@
-use std::{io::Cursor, str::FromStr};
+use std::io::Cursor;
 
-use device_query::{DeviceQuery, DeviceState};
 use image::ImageOutputFormat;
 use mime::IMAGE_PNG;
 use screenshots::Screen;
@@ -9,30 +8,23 @@ use tauri::{
     plugin::{Builder as PluginBuilder, TauriPlugin},
     AppHandle, Manager, Runtime, State, Window,
 };
-use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::{
-    consts::WindowLabel,
-    db::{Create, Upload, UploadBuilder},
+    db::crud::{Create, Upload, UploadBuilder},
     error::AnyhowError,
-    plugin::ManagerLock,
-    rect::Point,
+    s3::plugin::UploadManagerExt,
+    rect::{Point, Rect},
+    window_config::WindowLabel,
 };
 pub enum ScreenshotState<R: Runtime> {
     // default state
     Idle,
     // the user has created the overlay window
-    Started {
-        window: tauri::Window<R>,
-    },
-    // the user performed initial  click
-    InProgress {
-        window: tauri::Window<R>,
-        point: Point<i32>,
-        screen: Screen,
-    },
+    Started { window: tauri::Window<R> },
+    Uploading,
 }
 
 pub struct ScreenshotManager<R: Runtime> {
@@ -40,15 +32,7 @@ pub struct ScreenshotManager<R: Runtime> {
     app: AppHandle<R>,
 }
 
-pub struct ScreenshotManagerLock<R: Runtime> {
-    inner: RwLock<ScreenshotManager<R>>,
-}
-
-impl<R: Runtime> ScreenshotManagerLock<R> {
-    pub fn inner(&self) -> &RwLock<ScreenshotManager<R>> {
-        &self.inner
-    }
-}
+pub type ScreenshotManagerLock<R> = RwLock<ScreenshotManager<R>>;
 
 pub trait ScreenshotManagerExt<R: Runtime> {
     fn screenshot_manager(&self) -> &ScreenshotManagerLock<R>;
@@ -60,29 +44,17 @@ impl<R: Runtime, T: Manager<R>> ScreenshotManagerExt<R> for T {
     }
 }
 
-fn get_current_point() -> Point<i32> {
-    let device_state = DeviceState::new();
-    let mouse_state = device_state.get_mouse();
-    let (x, y) = mouse_state.coords;
-    Point { x, y }
-}
-
 impl<R: Runtime> ScreenshotManager<R> {
     pub fn start(&mut self) -> Result<(), AnyhowError> {
         match self.inner {
             ScreenshotState::Idle => {
                 // create new window from app handle
-                let window = tauri::WindowBuilder::new(
-                    &self.app,
-                    WindowLabel::Overlay,
-                    tauri::WindowUrl::App("index.html#/screenshot".into()),
-                )
-                .always_on_top(true)
-                .transparent(true)
-                .decorations(false)
-                .maximized(true)
-                .build()?;
+                let window = WindowLabel::Overlay.into_builder(&self.app).build()?;
 
+                let _ = self
+                    .app
+                    .global_shortcut()
+                    .register(cancel_screen_shortcut());
                 self.inner = ScreenshotState::Started { window };
                 Ok(())
             }
@@ -91,41 +63,54 @@ impl<R: Runtime> ScreenshotManager<R> {
     }
 
     pub fn cancel(&mut self) -> Result<(), AnyhowError> {
-        self.inner = ScreenshotState::Idle;
-        Ok(())
-    }
-
-    pub fn begin(&mut self) -> Result<(), AnyhowError> {
+        let _ = self
+            .app
+            .global_shortcut()
+            .unregister(cancel_screen_shortcut());
         match &self.inner {
             ScreenshotState::Started { window } => {
-                let point = get_current_point();
-                let screen = Screen::from_point(point.x, point.y)?;
-                self.inner = ScreenshotState::InProgress {
-                    window: window.clone(),
-                    point,
-                    screen,
-                };
+                dbg!(&window.label());
+                window.close()?;
+                self.inner = ScreenshotState::Idle;
                 Ok(())
             }
-            _ => Err(anyhow::anyhow!("ScreenshotManager is not idle!").into()),
+            _ => {
+                self.inner = ScreenshotState::Idle;
+                Ok(())
+            }
         }
     }
 
-    pub fn finish(&mut self) -> Result<(), AnyhowError> {
+    fn done_loading(&mut self) -> Result<(), AnyhowError> {
         match &self.inner {
-            ScreenshotState::InProgress {
-                point,
-                screen,
-                window,
-            } => {
+            ScreenshotState::Uploading => {
+                self.inner = ScreenshotState::Idle;
+                Ok(())
+            }
+            _ => Err(anyhow::anyhow!("ScreenshotManager is not uploading!").into()),
+        }
+    }
+
+    pub fn finish(&mut self, from_window: &Window<R>, rect: Rect<i32>) -> Result<(), AnyhowError> {
+        let _ = self
+            .app
+            .global_shortcut()
+            .unregister(cancel_screen_shortcut());
+        match &self.inner {
+            ScreenshotState::Started { window } => {
+                if window.label() != from_window.label() {
+                    return Err(anyhow::anyhow!("Window labels dont match").into());
+                }
+
+                let monitor = window.current_monitor()?.expect("Monitor can't be None");
+
+                dbg!(&window.label());
                 window.close()?;
                 let app = self.app.clone();
-                let point = *point;
-                let screen = *screen;
+                self.inner = ScreenshotState::Uploading;
                 tauri::async_runtime::spawn(async move {
-                    let end = get_current_point();
-                    let rect = point.to_rect(end);
                     let origin = rect.origin();
+                    let screen = Screen::from_point(origin.x, origin.y)?;
                     let buf = screen.capture_area(
                         origin.x,
                         origin.y,
@@ -137,7 +122,7 @@ impl<R: Runtime> ScreenshotManager<R> {
                     buf.write_to(&mut writer, ImageOutputFormat::Png)?;
                     let mime = IMAGE_PNG;
                     let url = app
-                        .state::<ManagerLock>()
+                        .upload_manager()
                         .read()
                         .await
                         .new_upload(
@@ -151,7 +136,13 @@ impl<R: Runtime> ScreenshotManager<R> {
                     let pool = app.state::<SqlitePool>();
                     let builder = UploadBuilder { url, mime };
                     Upload::create(builder, &pool).await?;
-                    Ok::<(), AnyhowError>(())
+
+                    // complete the loading state
+                    app.state::<ScreenshotManagerLock<R>>()
+                        .inner()
+                        .write()
+                        .await
+                        .done_loading()
                 });
                 self.inner = ScreenshotState::Idle;
                 Ok::<(), AnyhowError>(())
@@ -159,32 +150,7 @@ impl<R: Runtime> ScreenshotManager<R> {
             _ => Err(anyhow::anyhow!("ScreenshotManager is not started!").into()),
         }
     }
-
-    // pub fn transition(
-    //     &mut self,
-    //     msg: ShortcutMessages,
-    //     tx: &Sender<ImageBuffer<Rgba<u8>, Vec<u8>>>,
-    // ) -> Result<(), AnyhowError> {
-    //     match msg {
-    //         ShortcutMessages::Ready => self.activate(),
-    //         ShortcutMessages::Start => self.start(),
-    //         ShortcutMessages::Finish => self.finish().map(|val| {
-    //             let tx = tx.clone();
-    //             tauri::async_runtime::spawn(async move {
-    //                 let tx = tx.clone();
-    //                 tx.send(val).await;
-    //             });
-    //         }),
-    //         ShortcutMessages::Cancel => self.cancel(),
-    //     }
-    // }
 }
-
-// struct ShortcutChannel<R: Runtime> {
-//     manager: ScreenshotManager,
-//     rx: Receiver<ShortcutMessages>,
-//     app: AppHandle<R>,
-// }
 
 pub fn print_screen_shortcut() -> Shortcut {
     Shortcut::new(Some(Modifiers::SHIFT | Modifiers::META), Code::KeyP)
@@ -194,122 +160,74 @@ pub fn cancel_screen_shortcut() -> Shortcut {
     Shortcut::new(None, Code::Escape)
 }
 
-// fn start_sc<R: Runtime>(app: &AppHandle<R>) -> Result<(), AnyhowError> {
-//     app.global_shortcut().register(cancel_screen_shortcut());
-//     Ok(())
-// }
-
-// fn end_sc<R: Runtime>(app: &AppHandle<R>) -> Result<(), AnyhowError> {
-//     app.global_shortcut().unregister(cancel_screen_shortcut());
-//     if let Some(w) = app.get_window(WindowLabel::Overlay.to_string().as_str()) {
-//         w.close()?;
-//     }
-//     Ok(())
-// }
-
-// pub fn create_screenshot_channel<R: Runtime>(app: &AppHandle<R>) -> Sender<ShortcutMessages> {
-//     let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-//     let tx2 = tx.clone();
-//     let sender = tx.clone();
-//     let (return_tx, mut return_rx) = tokio::sync::mpsc::channel(1);
-
-//     let app_thread_1 = app.clone();
-//     let task1 = tauri::async_runtime::spawn(async move {
-//         let app = app_thread_1;
-//         let mut manager = ScreenshotManager::default();
-
-//         let device = DeviceState::new();
-//         let down_guard = device.on_mouse_down(move |button| {
-//             let tx = tx.clone();
-//             if button == &1_usize {
-//                 tauri::async_runtime::spawn(async move {
-//                     let tx = tx.clone();
-//                     tx.send(ShortcutMessages::Start).await;
-//                 });
-//             }
-//         });
-
-//         let up: Box<dyn Fn(&usize) + Send + Sync + 'static> = Box::new(move |button| {
-//             let tx = tx2.clone();
-//             if button == &1_usize {
-//                 tauri::async_runtime::spawn(async move {
-//                     let tx = tx.clone();
-//                     tx.send(ShortcutMessages::Finish).await;
-//                 });
-//             }
-//         });
-
-//         let up_guard = device.on_mouse_up(up);
-
-//         while let Some(msg) = rx.recv().await {
-//             match (msg, manager.transition(msg, &return_tx)) {
-//                 (ShortcutMessages::Start, Ok(_)) => {
-//                     start_sc(&app);
-//                 }
-//                 (ShortcutMessages::Cancel | ShortcutMessages::Finish, _) => {
-//                     end_sc(&app);
-//                 }
-//                 _ => {}
-//             }
-//         }
-//         Ok::<(), AnyhowError>(())
-//     });
-
-//     let app_thread_2 = app.clone();
-//     let task2 = tauri::async_runtime::spawn(async move {
-//         let app = app_thread_2;
-//         while let Some(buf) = return_rx.recv().await {
-//         }
-//         Ok::<(), AnyhowError>(())
-//     });
-
-//     app.manage([task1, task2]);
-//     sender
-
-// }
-
 pub struct ScreenshotPlugin;
 
 impl ScreenshotPlugin {
     pub fn init<R: Runtime>() -> TauriPlugin<R> {
         PluginBuilder::new("screenshot")
             .invoke_handler(tauri::generate_handler![
-                start_screenshot,
-                finish_screenshot
+                finish_screenshot,
+                debug,
+                get_taskbar_offset
             ])
             .setup(move |app, _api| {
                 let manager = ScreenshotManager {
                     app: app.clone(),
                     inner: ScreenshotState::Idle,
                 };
-                app.manage(ScreenshotManagerLock {
-                    inner: RwLock::new(manager),
-                });
+                app.manage(RwLock::new(manager));
+                app.global_shortcut().register(print_screen_shortcut())?;
                 Ok(())
             })
             .build()
     }
+
+    pub fn handle_hotkeys<R: Runtime>(app: &AppHandle<R>, hotkey: &Shortcut) {
+        match hotkey.id() {
+            x if x == print_screen_shortcut().id() => {
+                dbg!("print screen");
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    app.screenshot_manager().write().await.start()
+                });
+            }
+            x if x == cancel_screen_shortcut().id() => {
+                dbg!("cancel screen");
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    app.screenshot_manager().write().await.cancel()
+                });
+            }
+            _ => (),
+        }
+    }
 }
 
 #[tauri::command]
-async fn start_screenshot<R: Runtime>(
-    window: Window<R>,
-    state: State<'_, ScreenshotManagerLock<R>>,
-) -> Result<(), AnyhowError> {
-    // only accept command from the overlay window
-    match WindowLabel::from_str(window.label()) {
-        Ok(WindowLabel::Overlay) => state.inner.write().await.start(),
-        _ => Err(anyhow::anyhow!("Invalid window label: {}", window.label()).into()),
-    }
+async fn get_taskbar_offset<R: Runtime>(window: Window<R>) -> Result<f64, AnyhowError> {
+    let monitor = window.current_monitor()?.expect("Monitor can't be None");
+    let monitor_rect = monitor.size();
+    let window_rect = window.inner_size()?;
+    let diff = monitor_rect.height - window_rect.height;
+    let scaled_diff = diff as f64 / monitor.scale_factor();
+    Ok(scaled_diff)
 }
 
 #[tauri::command]
 async fn finish_screenshot<R: Runtime>(
     window: Window<R>,
     state: State<'_, ScreenshotManagerLock<R>>,
+    point_a: Point<i32>,
+    point_b: Point<i32>,
 ) -> Result<(), AnyhowError> {
-    match WindowLabel::from_str(window.label()) {
-        Ok(WindowLabel::Overlay) => state.inner.write().await.finish(),
-        _ => Err(anyhow::anyhow!("Invalid window label: {}", window.label()).into()),
-    }
+    state
+        .write()
+        .await
+        .finish(&window, point_a.to_rect(point_b))
+}
+
+#[tauri::command]
+async fn debug(s: String) -> Result<(), AnyhowError> {
+    dbg!(&s);
+    Ok(())
 }

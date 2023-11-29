@@ -1,10 +1,11 @@
+use serde::{Deserialize, Serialize};
 use std::{cmp, ops::Sub};
 
 pub trait Num: Sub + Eq + Ord + Copy {}
 
 impl<T> Num for T where T: Sub + Eq + Ord + Copy {}
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Point<T>
 where
     T: Num,
@@ -32,7 +33,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct Rect<T>
 where
     T: Num,

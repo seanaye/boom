@@ -13,7 +13,7 @@ const defaultState = {
 
 type FormState = typeof defaultState;
 
-export function EditS3ConfigForm(props: { initialForm?: FormState }) {
+export function EditS3ConfigForm(props: { initialForm?: FormState; id?: number }) {
   const [form, setForm] = createStore(props.initialForm ?? defaultState);
 
   const updateFormField = (fieldName: string) => (event: Event) => {
@@ -29,7 +29,7 @@ export function EditS3ConfigForm(props: { initialForm?: FormState }) {
         e.preventDefault();
         const config = JSON.parse(JSON.stringify(form));
         console.log({ d: config });
-        const res = await invoke("plugin:api|create_config", { config });
+        const res = await invoke("create_config", { config });
         console.log(res);
       }}
     >

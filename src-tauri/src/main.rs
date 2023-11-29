@@ -3,58 +3,40 @@
     windows_subsystem = "windows"
 )]
 
-use anyhow::Context;
-use db::{Create, Delete, I64Id, Read, S3ConfigFields, S3ConfigRaw, SelectedConfig, Update};
-use error::{AnyhowError, Validated};
-use mime::Mime;
-use plugin::ManagerLock;
-use s3::S3Config;
-use screenshot::{
-    cancel_screen_shortcut, print_screen_shortcut, ScreenshotManagerExt,
-};
-use sqlx::SqlitePool;
-use std::{borrow::Cow, path::PathBuf};
-use tauri::{
-    generate_handler, ipc::InvokeBody, tray::ClickType, Manager, State,
-};
-
-use tauri_plugin_positioner::{Position, WindowExt};
-
-use uuid::Uuid;
-
-use crate::{db::{List, Upload, UploadBuilder}, consts::WindowLabel};
-
-mod consts;
-mod db;
+pub mod db;
 mod error;
-mod plugin;
 mod rect;
 mod s3;
 mod screenshot;
+mod window_config;
+
+use anyhow::Context;
+use db::crud::{Upload, Read, Delete, List, S3ConfigRaw, S3ConfigFields, Create, Update, SelectedConfig, UploadBuilder};
+use error::{AnyhowError, Validated};
+use mime::Mime;
+use screenshot::ScreenshotPlugin;
+use sqlx::SqlitePool;
+use std::{borrow::Cow, path::PathBuf};
+use tauri::{generate_handler, ipc::InvokeBody, tray::ClickType, Manager, RunEvent, State};
+use tauri_plugin_positioner::{Position, WindowExt};
+use s3::plugin::UploadManager;
+use uuid::Uuid;
+
+
+
+
+use window_config::WindowLabel;
 
 fn main() {
-
     let mut app = tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
-        .plugin(plugin::Api::init("sqlite:boom.db").build())
+        .plugin(db::plugin::DatabasePlugin::init("sqlite:boom.db").build())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(screenshot::ScreenshotPlugin::init())
         .plugin(
-            tauri_plugin_global_shortcut::Builder::with_handler(
-                move |app, shortcut| match shortcut.id() {
-                    x if x == print_screen_shortcut().id() => {
-                        let app = app.clone();
-                        tauri::async_runtime::spawn(async move { app.screenshot_manager().inner().write().await.start() });
-                    }
-                    x if x == cancel_screen_shortcut().id() => {
-                        let app = app.clone();
-                        tauri::async_runtime::spawn(async move { app.screenshot_manager().inner().write().await.cancel() });
-                    }
-                    _ => {}
-                },
-            )
-            .build(),
+            tauri_plugin_global_shortcut::Builder::with_handler(ScreenshotPlugin::handle_hotkeys)
+                .build(),
         )
+        .plugin(screenshot::ScreenshotPlugin::init())
         .setup(move |app| {
             let icon = tauri::Icon::File(PathBuf::from(
                 "/Users/seanaye/dev/boom/src-tauri/icons/icon.ico",
@@ -70,10 +52,10 @@ fn main() {
                             if let Some(window) = app.get_window(WindowLabel::Main.into()) {
                                 let _ = window.move_window(Position::TrayCenter);
                                 let _ = match window.is_focused() {
-                                    Ok(true) => { 
+                                    Ok(true) => {
                                         let _ = window.hide();
                                         Ok(())
-                                    },
+                                    }
                                     Ok(false) => {
                                         let _ = window.show();
                                         let _ = window.set_focus();
@@ -82,10 +64,10 @@ fn main() {
                                     Err(e) => Err(e),
                                 };
                             }
-                        },
+                        }
                         ClickType::Right => {
                             dbg!("right click");
-                        },
+                        }
                         _ => (),
                     }
                 })
@@ -110,7 +92,19 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
     app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-    app.run(|_, _| {})
+
+    app.run(|handle, event| match event {
+        RunEvent::Ready => {
+            let _ = WindowLabel::Main.into_builder(handle).build();
+        }
+        RunEvent::ExitRequested { api, .. } => {
+            dbg!("exit requested");
+            let windows = handle.windows();
+            dbg!("windows {:?}", windows);
+            api.prevent_exit();
+        }
+        _ => (),
+    })
 }
 
 #[tauri::command]
@@ -137,7 +131,7 @@ async fn update_config(
 
 #[tauri::command]
 async fn delete_config(s: State<'_, SqlitePool>, config_id: i64) -> Result<(), AnyhowError> {
-    S3ConfigFields::delete(I64Id { id: config_id }, &s).await?;
+    S3ConfigFields::delete(config_id, &s).await?;
     Ok(())
 }
 
@@ -147,8 +141,12 @@ async fn get_selected(s: State<'_, SqlitePool>) -> Result<Option<S3ConfigRaw>, A
 }
 
 #[tauri::command]
-async fn set_selected(s: State<'_, SqlitePool>, manager: State<'_, ManagerLock>, config_id: i64) -> Result<(), AnyhowError> {
-    SelectedConfig::set(I64Id { id: config_id }, &s).await?;
+async fn set_selected(
+    s: State<'_, SqlitePool>,
+    manager: State<'_, UploadManager>,
+    config_id: i64,
+) -> Result<(), AnyhowError> {
+    SelectedConfig::set(config_id, &s).await?;
     let conf = SelectedConfig::get(&s)
         .await?
         .context("No config selected")?;
@@ -156,16 +154,10 @@ async fn set_selected(s: State<'_, SqlitePool>, manager: State<'_, ManagerLock>,
     Ok(())
 }
 
-async fn get_s3_config(pool: &SqlitePool) -> Result<S3Config, AnyhowError> {
-    Ok(SelectedConfig::get(pool)
-        .await?
-        .context("No config selected")?
-        .build()?)
-}
 
 #[tauri::command]
 async fn begin_upload(
-    manager: State<'_, ManagerLock>,
+    manager: State<'_, UploadManager>,
     window: tauri::Window,
 ) -> Result<(), AnyhowError> {
     manager
@@ -179,11 +171,10 @@ async fn begin_upload(
 
 #[tauri::command]
 async fn upload_url_part<'a>(
-    manager: State<'_, ManagerLock>,
+    manager: State<'_, UploadManager>,
     conn: State<'_, SqlitePool>,
     request: tauri::ipc::Request<'a>,
 ) -> Result<bool, AnyhowError> {
-
     let slice: &[u8] = match request.body() {
         InvokeBody::Raw(b) => Ok(b),
         _ => Err(anyhow::anyhow!("expected raw bytes")),
@@ -215,9 +206,7 @@ async fn list_uploads(pool: State<'_, SqlitePool>) -> Result<Vec<Upload>, Anyhow
 }
 
 #[tauri::command]
-async fn get_rms(
-    request: tauri::ipc::Request<'_>,
-) -> Result<f32, AnyhowError> {
+async fn get_rms(request: tauri::ipc::Request<'_>) -> Result<f32, AnyhowError> {
     let slice: &[u8] = match request.body() {
         InvokeBody::Raw(b) => Ok(b),
         _ => Err(anyhow::anyhow!("expected raw bytes")),
@@ -229,9 +218,11 @@ async fn get_rms(
 }
 
 #[tauri::command]
-async fn delete_upload(manager: State<'_, ManagerLock>, pool: State<'_, SqlitePool>, id: i64) -> Result<(), AnyhowError> {
-    let id = I64Id { id };
-
+async fn delete_upload(
+    manager: State<'_, UploadManager>,
+    pool: State<'_, SqlitePool>,
+    id: i64,
+) -> Result<(), AnyhowError> {
     let url = Upload::read(id, &pool).await?.url()?;
     let mut path = Cow::from(url.path());
     if path.starts_with('/') {
@@ -242,9 +233,5 @@ async fn delete_upload(manager: State<'_, ManagerLock>, pool: State<'_, SqlitePo
     Upload::delete(id, &pool).await?;
     Ok(())
 }
-
-
-
-
 
 

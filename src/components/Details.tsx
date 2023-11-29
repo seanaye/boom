@@ -8,18 +8,19 @@ export function Details(
     summary: JSX.Element;
   },
 ) {
+  const { summary, ...rest } = props;
   const [open, setOpen] = createSignal(false);
 
   return (
     <details
-      {...props}
+      {...rest}
       open={open()}
       onToggle={(e) => {
         setOpen(e.currentTarget.open);
       }}
     >
       {props.summary}
-      <Show when={open}>{props.children}</Show>
+      <Show when={open()}>{props.children}</Show>
     </details>
   );
 }

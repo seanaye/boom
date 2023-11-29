@@ -49,20 +49,6 @@
     "macOSPrivateApi": true,
     "security": {
       "csp": null
-    },
-    "windows": [
-      {
-        "fullscreen": false,
-        "height": 600,
-        "resizable": false,
-        "title": "boom",
-        "width": 500,
-        "visible": false,
-        "hiddenTitle": true,
-        "decorations": false,
-        "focus": false,
-        "transparent": true
-      }
-    ]
+    }
   }
 }
