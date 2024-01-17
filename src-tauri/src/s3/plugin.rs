@@ -93,6 +93,7 @@ impl UploadClient {
         };
 
         let conf = conf?;
+        dbg!(&conf);
         let (tx, rx) = tauri::async_runtime::channel(10);
         let upload = InProgressUploadNotifier::new(
             InProgressUploadNotifierBuilder {
@@ -153,7 +154,7 @@ impl UploadClient {
 }
 
 
-struct S3Plugin;
+pub struct S3Plugin;
 
 async fn get_s3_config(pool: &SqlitePool) -> Result<S3Config, AnyhowError> {
     Ok(SelectedConfig::get(pool)
@@ -164,7 +165,7 @@ async fn get_s3_config(pool: &SqlitePool) -> Result<S3Config, AnyhowError> {
 
 pub type UploadManager = RwLock<UploadClient>;
 impl S3Plugin {
-    pub fn build<R: Runtime>() -> TauriPlugin<R, ()> {
+    pub fn build<R: Runtime>(self) -> TauriPlugin<R, ()> {
         PluginBuilder::<R, ()>::new("s3")
         .setup(move |app, _api| {
                 let mut manager = UploadClient::default();

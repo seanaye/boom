@@ -34,7 +34,7 @@ export function S3ConfigFormList() {
               checked={active()?.id === d.id}
             />
             <label for={`${d.id}`}>{d.bucket_name}</label>
-            <IconButton as="a" href="/settings/config/:id/edit">
+            <IconButton as="a" href={`/settings/config/${d.id}/edit`}>
               <div class="i-heroicons-pencil" />
             </IconButton>
           </>

@@ -31,6 +31,7 @@ fn main() {
     let mut app = tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
         .plugin(db::plugin::DatabasePlugin::init("sqlite:boom.db").build())
+        .plugin(s3::plugin::S3Plugin.build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::with_handler(ScreenshotPlugin::handle_hotkeys)
@@ -48,7 +49,6 @@ fn main() {
                     tauri_plugin_positioner::on_tray_event(app, &event);
                     match event.click_type {
                         ClickType::Left => {
-                            dbg!("left click");
                             if let Some(window) = app.get_window(WindowLabel::Main.into()) {
                                 let _ = window.move_window(Position::TrayCenter);
                                 let _ = match window.is_focused() {
@@ -79,6 +79,7 @@ fn main() {
         .invoke_handler(generate_handler![
             list_configs,
             create_config,
+            get_config,
             update_config,
             delete_config,
             get_selected,
@@ -127,6 +128,14 @@ async fn update_config(
 ) -> Result<Validated<S3ConfigRaw>, AnyhowError> {
     let (id, fields) = config.into_parts();
     S3ConfigRaw::update(id, fields, &s).await.try_into()
+}
+
+#[tauri::command]
+async fn get_config(
+    s: State<'_, SqlitePool>,
+    id: i64
+) -> Result<S3ConfigRaw, AnyhowError> {
+    S3ConfigRaw::read(id, &s).await
 }
 
 #[tauri::command]

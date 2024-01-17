@@ -13,7 +13,9 @@ const defaultState = {
 
 type FormState = typeof defaultState;
 
-export function EditS3ConfigForm(props: { initialForm?: FormState; id?: number }) {
+export type AlreadyExistingForm = FormState & { id: number };
+
+export function EditS3ConfigForm(props: { initialForm?: AlreadyExistingForm }) {
   const [form, setForm] = createStore(props.initialForm ?? defaultState);
 
   const updateFormField = (fieldName: string) => (event: Event) => {
@@ -22,6 +24,7 @@ export function EditS3ConfigForm(props: { initialForm?: FormState; id?: number }
       [fieldName]: inputElement.value,
     });
   };
+
   return (
     <form
       class="grid flow-col gap-4"
@@ -38,6 +41,7 @@ export function EditS3ConfigForm(props: { initialForm?: FormState; id?: number }
           type="text"
           placeholder="name"
           onChange={updateFormField("nickname")}
+          value={form.nickname}
         />
         Nickname
       </label>
@@ -46,6 +50,7 @@ export function EditS3ConfigForm(props: { initialForm?: FormState; id?: number }
           type="text"
           placeholder="name"
           onChange={updateFormField("endpoint")}
+          value={form.endpoint}
         />
         Endpoint
       </label>
@@ -54,6 +59,7 @@ export function EditS3ConfigForm(props: { initialForm?: FormState; id?: number }
           type="text"
           placeholder="name"
           onChange={updateFormField("region")}
+          value={form.region}
         />
         Region
       </label>
@@ -62,6 +68,7 @@ export function EditS3ConfigForm(props: { initialForm?: FormState; id?: number }
           type="text"
           placeholder="name"
           onChange={updateFormField("bucket_name")}
+          value={form.bucket_name}
         />
         Bucket Name
       </label>
@@ -70,6 +77,7 @@ export function EditS3ConfigForm(props: { initialForm?: FormState; id?: number }
           type="text"
           placeholder="name"
           onChange={updateFormField("host_rewrite")}
+          value={form.host_rewrite}
         />
         Host Rewrite (Optional)
       </label>
@@ -78,6 +86,7 @@ export function EditS3ConfigForm(props: { initialForm?: FormState; id?: number }
           type="text"
           placeholder="name"
           onChange={updateFormField("public_key")}
+          value={form.public_key}
         />
         Public Key
       </label>
@@ -86,10 +95,11 @@ export function EditS3ConfigForm(props: { initialForm?: FormState; id?: number }
           type="password"
           placeholder="name"
           onChange={updateFormField("private_key")}
+          value={form.private_key}
         />
         Private key
       </label>
-      <button type="submit">Create</button>
+      <button type="submit">{props.initialForm ? "Update" : "Create"}</button>
     </form>
   );
 }

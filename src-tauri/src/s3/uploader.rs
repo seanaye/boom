@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{time::Duration, fmt::Debug};
 
 use bytes::BytesMut;
 use rusty_s3::{
@@ -129,23 +129,25 @@ pub struct InProgressUploadNotifier {
 }
 
 impl InProgressUploadNotifier {
-    async fn wrap<T>(&self, res: Result<T, AnyhowError>, success_event: UploadEvent) -> Result<T, AnyhowError> {
+    async fn wrap<T: Debug>(&self, res: Result<T, AnyhowError>, success_event: UploadEvent) -> Result<T, AnyhowError> {
         Self::wrapper(&self.tx, res, success_event).await
     }
-    async fn wrapper<T>(tx: &Sender<UploadEvent>, res: Result<T, AnyhowError>, success_event: UploadEvent) -> Result<T, AnyhowError> {
+    async fn wrapper<T: Debug>(tx: &Sender<UploadEvent>, res: Result<T, AnyhowError>, success_event: UploadEvent) -> Result<T, AnyhowError> {
+        dbg!(&res);
         match res {
             Ok(t) => {
-                tx.send(success_event).await?;
+                let _ = tx.send(success_event).await;
                 Ok(t)
             },
             Err(e) => {
-                tx.send(UploadEvent::Failed).await?;
+                let _ = tx.send(UploadEvent::Failed).await;
                 Err(e)
             }
         }
     }
 }
 
+#[derive(Debug)]
 pub struct CompletedData {
     pub upload_url: Url,
 }
@@ -274,6 +276,10 @@ impl Uploader<InProgressUploadNotifierBuilder> for InProgressUploadNotifier {
     }
 
 }
+
+
+
+
 
 
 

@@ -52,3 +52,13 @@ impl DatabasePlugin {
             .build()
     }
 }
+
+pub trait DatabaseExt<R: Runtime> {
+    fn database(&self) -> &SqlitePool;
+}
+
+impl<R: Runtime, T: Manager<R>> DatabaseExt<R> for T {
+    fn database(&self) -> &SqlitePool {
+        self.state::<SqlitePool>().inner()
+    }
+}

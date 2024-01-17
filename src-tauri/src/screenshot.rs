@@ -3,7 +3,6 @@ use std::io::Cursor;
 use image::ImageOutputFormat;
 use mime::IMAGE_PNG;
 use screenshots::Screen;
-use sqlx::SqlitePool;
 use tauri::{
     plugin::{Builder as PluginBuilder, TauriPlugin},
     AppHandle, Manager, Runtime, State, Window,
@@ -13,7 +12,7 @@ use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::{
-    db::crud::{Create, Upload, UploadBuilder},
+    db::{crud::{Create, Upload, UploadBuilder}, plugin::DatabaseExt},
     error::AnyhowError,
     s3::plugin::UploadManagerExt,
     rect::{Point, Rect},
@@ -102,8 +101,6 @@ impl<R: Runtime> ScreenshotManager<R> {
                     return Err(anyhow::anyhow!("Window labels dont match").into());
                 }
 
-                let monitor = window.current_monitor()?.expect("Monitor can't be None");
-
                 dbg!(&window.label());
                 window.close()?;
                 let app = self.app.clone();
@@ -133,9 +130,9 @@ impl<R: Runtime> ScreenshotManager<R> {
                         .await?
                         .upload_url;
 
-                    let pool = app.state::<SqlitePool>();
+                    let pool = app.database();
                     let builder = UploadBuilder { url, mime };
-                    Upload::create(builder, &pool).await?;
+                    Upload::create(builder, pool).await?;
 
                     // complete the loading state
                     app.state::<ScreenshotManagerLock<R>>()
